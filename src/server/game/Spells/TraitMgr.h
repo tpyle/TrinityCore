@@ -87,6 +87,7 @@ struct SpentCurrency
 void Load();
 int32 GenerateNewTraitConfigId();
 TraitConfigType GetConfigTypeForTree(int32 traitTreeId);
+void FillOwnedCurrenciesMap(WorldPackets::Traits::TraitConfig const& traitConfig, PlayerDataAccessor player, std::map<int32, int32>& currencies);
 void FillSpentCurrenciesMap(std::vector<WorldPackets::Traits::TraitEntry> const& traitEntries, std::map<int32, SpentCurrency>& cachedCurrencies);
 std::vector<UF::TraitEntry> GetGrantedTraitEntriesForConfig(WorldPackets::Traits::TraitConfig const& traitConfig, PlayerDataAccessor player);
 bool IsValidEntry(WorldPackets::Traits::TraitEntry const& traitEntry);

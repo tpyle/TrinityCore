@@ -18,6 +18,7 @@
 // This is where scripts' loading functions should be declared:
 void AddClassicScripts();
 void AddSC_npc_profession_tutor();
+void AddSC_talentgrant_commandscript();
 
 // The name of this function should match:
 // void Add${NameOfDirectory}Scripts()
@@ -25,4 +26,5 @@ void AddCustomScripts()
 {
     AddClassicScripts();
     AddSC_npc_profession_tutor();
+    AddSC_talentgrant_commandscript();
 }
