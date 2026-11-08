@@ -610,7 +610,9 @@ void CollectionMgr::SaveAccountItemAppearances(LoginDatabaseTransaction trans)
 
 void CollectionMgr::AddItemAppearance(Item* item)
 {
-    if (!item->IsSoulBound())
+    // Classic 1.60: most white and grey gear has no binding at all, so it never became soulbound and was never collected,
+    // even when worn. Collect unbound items when obtained, like bind-on-pickup ones.
+    if (!item->IsSoulBound() && item->GetBonding() != BIND_NONE)
         return;
 
     ItemModifiedAppearanceEntry const* itemModifiedAppearance = item->GetItemModifiedAppearance();
