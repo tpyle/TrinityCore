@@ -2506,8 +2506,15 @@ void Player::InitTalentForLevel()
     int32 talentTiers = DB2Manager::GetNumTalentsAtLevel(level, Classes(GetClass()));
     if (level < 15)
     {
-        // Remove all talent points
-        ResetTalents(true);
+        // Classic 1.60: talents start at level 10 and points can also be granted (.talents), so resetting every
+        // level-up below 15 wiped real builds. Reset only when the active config spends more than is now owned
+        // (level lowered, points taken away).
+        UF::TraitConfig const* activeConfig = GetTraitConfig(m_activePlayerData->ActiveCombatTraitConfigID);
+        WorldPackets::Traits::TraitConfig checkConfig;
+        if (activeConfig)
+            checkConfig = WorldPackets::Traits::TraitConfig(*activeConfig);
+        if (!activeConfig || TraitMgr::ValidateConfig(checkConfig, this) != TraitMgr::LearnResult::Ok)
+            ResetTalents(true);
     }
     else
     {
