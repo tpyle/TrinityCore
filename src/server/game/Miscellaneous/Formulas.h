@@ -25,6 +25,7 @@
 #include "ScriptMgr.h"
 #include "SharedDefines.h"
 #include "World.h"
+#include "WorldScale.h"
 
 namespace Trinity
 {
@@ -183,7 +184,13 @@ namespace Trinity
             {
                 float xpMod = 1.0f;
 
-                gain = BaseGain(player->GetLevel(), u->GetLevelForTarget(player));
+                uint8 const levelForPlayer = u->GetLevelForTarget(player);
+                gain = BaseGain(player->GetLevel(), levelForPlayer);
+
+                // Classic 1.60: world scaling (WorldScale.h) - a creature scaled up to the player's level pays only part of the
+                // way from its own kill experience (none for a grey one) towards that of a creature of the player's level
+                if (creature && creature->IsWorldScaled() && levelForPlayer != creature->GetLevel())
+                    gain = WorldScale::BlendXP(BaseGain(player->GetLevel(), creature->GetLevel()), gain, WorldScale::GetConfig().KillXPFraction);
 
                 if (gain && creature)
                 {

@@ -52,6 +52,7 @@
 #include "TemporarySummon.h"
 #include "Vehicle.h"
 #include "World.h"
+#include "WorldScale.h"
 #include "ZoneScript.h"
 #include <G3D/g3dmath.h>
 #include <sstream>
@@ -1622,7 +1623,9 @@ void Creature::SelectLevel()
 {
     // Level
     ApplyLevelScaling();
-    int32 levelWithDelta = m_unitData->ScalingLevelMax + m_unitData->ScalingLevelDelta;
+    // Classic 1.60: a world scaled creature keeps its own vanilla level (the bottom of its range); retail creatures are
+    // the top of theirs and scale down
+    int32 levelWithDelta = m_worldScaled ? int32(m_unitData->ScalingLevelMin) : m_unitData->ScalingLevelMax + m_unitData->ScalingLevelDelta;
     uint8 level = RoundToInterval<int32>(levelWithDelta, 1, STRONG_MAX_LEVEL);
     SetLevel(level);
 
@@ -2261,6 +2264,11 @@ float Creature::GetAttackDistance(Unit const* player) const
     else // + - 1 yard for each level difference between player and creature
         aggroRadius += float(creatureLevel - playerLevel);
 
+    // Classic 1.60: world scaling - a creature scaled up to the player's level aggroes as if it were some levels below them
+    // (WorldScale.Aggro.LevelsBelow, 1 yard per level), not from the 15 yards of an equal level one
+    if (m_worldScaled && creatureLevel > int32(GetLevel()))
+        aggroRadius -= float(WorldScale::GetConfig().AggroLevelsBelow);
+
     // Make sure that we wont go over the total range limits
     if (aggroRadius > maxRadius)
         aggroRadius = maxRadius;
@@ -2276,6 +2284,12 @@ void Creature::setDeathState(DeathState s)
 
     if (s == JUST_DIED)
     {
+        // Classic 1.60: world scaling - a corpse shows everyone its real level (the client works out the skinning, mining
+        // or herbalism skill a corpse needs from the level it shows, the server from the real one). Rewards are already
+        // paid (Unit::Kill); respawning applies the scaling again (SelectLevel).
+        if (m_worldScaled)
+            SetUpdateFieldValue(m_values.ModifyValue(&Unit::m_unitData).ModifyValue(&UF::UnitData::ScalingLevelMax), int32(m_unitData->ScalingLevelMin));
+
         m_corpseRemoveTime = GameTime::GetGameTime() + m_corpseDelay;
 
         uint32 respawnDelay = m_respawnDelay;
@@ -3190,9 +3204,26 @@ void Creature::ApplyLevelScaling()
     if (std::pair<uint8, uint8> const* classicLevel = sObjectMgr->GetCreatureClassicLevel(GetEntry()))
     {
         uint8 level = uint8(urand(classicLevel->first, classicLevel->second));
+
+        // World scaling (WorldScale.h): the ContentTuning row "this level to 60", so the client shows each player the
+        // creature at their own level and GetLevelForTarget scales it for them; the creature itself stays at this level
+        m_worldScaled = false;
+        if (WorldScale::CanScale(this, level))
+        {
+            int32 const contentTuningId = WorldScale::ContentTuningBase + level;
+            Optional<ContentTuningLevels> const levels = sDB2Manager.GetContentTuningData(contentTuningId, {});
+            if (levels && levels->MinLevel == level && levels->MaxLevel > level)
+            {
+                m_worldScaled = true;
+                ApplyLevelScaling(contentTuningId, 0);
+                return;
+            }
+        }
+
         SetUpdateFieldValue(m_values.ModifyValue(&Unit::m_unitData).ModifyValue(&UF::UnitData::ScalingLevelMin), level);
         SetUpdateFieldValue(m_values.ModifyValue(&Unit::m_unitData).ModifyValue(&UF::UnitData::ScalingLevelMax), level);
         SetUpdateFieldValue(m_values.ModifyValue(&Unit::m_unitData).ModifyValue(&UF::UnitData::ScalingLevelDelta), 0);
+        SetUpdateFieldValue(m_values.ModifyValue(&Unit::m_unitData).ModifyValue(&UF::UnitData::ContentTuningID), 0);
         return;
     }
 
@@ -3253,10 +3284,35 @@ uint64 Creature::GetMaxHealthByLevel(uint8 level) const
     return std::ceil(baseHealth * creatureDifficulty->HealthModifier);
 }
 
+// Classic 1.60: world scaling - a multiplier from the vanilla class/level table (the creature's own multipliers cancel out)
+float Creature::GetWorldScaleMultiplier(WorldObject const* target, int stat) const
+{
+    uint8 const level = GetLevel();
+    uint8 const levelForTarget = GetLevelForTarget(target);
+    if (levelForTarget == level)
+        return 1.0f;
+
+    uint8 const unitClass = GetCreatureTemplate()->unit_class;
+    ClassicCreatureClassLevelStats const* current = sObjectMgr->GetCreatureClassicClassLevelStats(level, unitClass);
+    ClassicCreatureClassLevelStats const* scaled = sObjectMgr->GetCreatureClassicClassLevelStats(levelForTarget, unitClass);
+    if (!current || !scaled)
+        return 1.0f;
+
+    switch (stat)
+    {
+        case 0:  return WorldScale::Ratio(float(current->Health), float(scaled->Health));
+        case 1:  return WorldScale::Ratio(current->MeleeDamage, scaled->MeleeDamage);
+        default: return WorldScale::Ratio(float(current->Armor), float(scaled->Armor));
+    }
+}
+
 float Creature::GetHealthMultiplierForTarget(WorldObject const* target) const
 {
     if (!HasScalableLevels())
         return 1.0f;
+
+    if (m_worldScaled)
+        return GetWorldScaleMultiplier(target, 0);
 
     uint8 levelForTarget = GetLevelForTarget(target);
 
@@ -3274,6 +3330,9 @@ float Creature::GetDamageMultiplierForTarget(WorldObject const* target) const
 {
     if (!HasScalableLevels())
         return 1.0f;
+
+    if (m_worldScaled)
+        return GetWorldScaleMultiplier(target, 1);
 
     uint8 levelForTarget = GetLevelForTarget(target);
 
@@ -3293,6 +3352,9 @@ float Creature::GetArmorMultiplierForTarget(WorldObject const* target) const
     if (!HasScalableLevels())
         return 1.0f;
 
+    if (m_worldScaled)
+        return GetWorldScaleMultiplier(target, 2);
+
     uint8 levelForTarget = GetLevelForTarget(target);
 
     return GetBaseArmorForLevel(levelForTarget) / GetBaseArmorForLevel(GetLevel());
@@ -3304,7 +3366,8 @@ uint8 Creature::GetLevelForTarget(WorldObject const* target) const
     {
         // If this creature should scale level, adapt level depending of target level
         // between UNIT_FIELD_SCALING_LEVEL_MIN and UNIT_FIELD_SCALING_LEVEL_MAX
-        if (HasScalableLevels())
+        // Classic 1.60: world scaling only applies against players and what they control; creatures fight at real levels
+        if (HasScalableLevels() && (!m_worldScaled || WorldScale::IsPlayerSide(target)))
         {
             int32 scalingLevelMin = m_unitData->ScalingLevelMin;
             int32 scalingLevelMax = m_unitData->ScalingLevelMax;

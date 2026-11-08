@@ -222,6 +222,9 @@ class TC_GAME_API Creature : public Unit, public GridObject<Creature>, public Ma
         float GetBaseArmorForLevel(uint8 level) const;
         float GetArmorMultiplierForTarget(WorldObject const* target) const override;
 
+        // Classic 1.60: world scaling (WorldScale.h) - a vanilla creature that scales up to the player's level for players
+        bool IsWorldScaled() const { return m_worldScaled; }
+
         bool IsInEvadeMode() const { return HasUnitState(UNIT_STATE_EVADE); }
         bool IsEvadingAttacks() const { return IsInEvadeMode() || CanNotReachTarget(); }
 
@@ -592,6 +595,10 @@ class TC_GAME_API Creature : public Unit, public GridObject<Creature>, public Ma
         CreatureGroup* m_formation;
         bool m_triggerJustAppeared;
         bool m_respawnCompatibilityMode;
+
+        // Classic 1.60: world scaling (WorldScale.h); set by ApplyLevelScaling at each spawn
+        bool m_worldScaled = false;
+        float GetWorldScaleMultiplier(WorldObject const* target, int stat) const;
 
         bool _aggroGracePeriodExpired;
 

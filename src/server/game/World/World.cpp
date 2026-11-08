@@ -20,6 +20,7 @@
 */
 
 #include "World.h"
+#include "WorldScale.h"
 #include "DeathRecap.h"
 #include "AccountMgr.h"
 #include "AchievementMgr.h"
@@ -1277,6 +1278,9 @@ void World::LoadConfigSettings(bool reload)
         // call ScriptMgr if we're reloading the configuration
         sScriptMgr->OnConfigLoad(reload);
     }
+
+    // Classic 1.60: world scaling (a reload applies to creatures as they next spawn or respawn)
+    WorldScale::LoadConfig();
 }
 
 /// Initialize the World
