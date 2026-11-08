@@ -1957,6 +1957,7 @@ class TC_GAME_API Unit : public WorldObject
         EnumFlag<SpellAuraInterruptFlags2> m_interruptMask2;
 
         float m_auraFlatModifiersGroup[UNIT_MOD_END][MODIFIER_TYPE_FLAT_END];
+        std::array<float, MAX_STATS> m_createStats = { };  // the part of each stat's BASE_VALUE that SetCreateStat owns
         float m_auraPctModifiersGroup[UNIT_MOD_END][MODIFIER_TYPE_PCT_END];
         float m_attackPowerMods[uint32(AttackPowerModIndex::End)][uint32(AttackPowerModType::End)];
         float m_weaponDamage[MAX_ATTACK][2];

@@ -5403,15 +5403,17 @@ void Unit::UpdateStatBuffModForClient(Stats stat)
 void Unit::SetCreateStat(Stats stat, float val)
 {
     UnitMods const unitMod = static_cast<UnitMods>(UNIT_MOD_STAT_START + AsUnderlyingType(stat));
-    // Classic 1.60: set, not add. Player::GiveLevel calls this with the new level's base stats, so adding stacked every level's
+    // Classic 1.60: replace, not add. Player::GiveLevel calls this with the new level's base stats, so adding stacked every level's
     // stats on top of each other (a level 2 paladin had 47 stamina instead of 24). Gear and auras use TOTAL_VALUE.
-    SetStatFlatModifier(unitMod, BASE_VALUE, val);
+    // Only the previous create stat is replaced, so other base bonuses (.bonusstats) survive a level-up.
+    float const delta = val - m_createStats[stat];
+    m_createStats[stat] = val;
+    HandleStatFlatModifier(unitMod, BASE_VALUE, delta, true);
 }
 
 float Unit::GetCreateStat(Stats stat) const
 {
-    UnitMods const unitMod = static_cast<UnitMods>(UNIT_MOD_STAT_START + AsUnderlyingType(stat));
-    return GetFlatModifierValue(unitMod, BASE_VALUE);
+    return m_createStats[stat];
 }
 
 void Unit::_RegisterDynObject(DynamicObject* dynObj)
