@@ -224,6 +224,9 @@ class TC_GAME_API Creature : public Unit, public GridObject<Creature>, public Ma
 
         // Classic 1.60: world scaling (WorldScale.h) - a vanilla creature that scales up to the player's level for players
         bool IsWorldScaled() const { return m_worldScaled; }
+        // fraction of a health point owed from earlier hits (Unit::DealDamage)
+        float GetWorldScaleDamageCarry() const { return m_worldScaleDamageCarry; }
+        void SetWorldScaleDamageCarry(float carry) { m_worldScaleDamageCarry = carry; }
 
         bool IsInEvadeMode() const { return HasUnitState(UNIT_STATE_EVADE); }
         bool IsEvadingAttacks() const { return IsInEvadeMode() || CanNotReachTarget(); }
@@ -598,6 +601,7 @@ class TC_GAME_API Creature : public Unit, public GridObject<Creature>, public Ma
 
         // Classic 1.60: world scaling (WorldScale.h); set by ApplyLevelScaling at each spawn
         bool m_worldScaled = false;
+        float m_worldScaleDamageCarry = 0.0f;
         float GetWorldScaleMultiplier(WorldObject const* target, int stat) const;
 
         bool _aggroGracePeriodExpired;

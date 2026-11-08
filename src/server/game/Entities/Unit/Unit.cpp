@@ -832,7 +832,23 @@ bool Unit::HasBreakableByDamageCrowdControlAura(Unit const* excludeCasterChannel
     uint32 damageDone = damage;
     uint32 damageTaken = damage;
     if (attacker)
-        damageTaken = damage / victim->GetHealthMultiplierForTarget(attacker);
+    {
+        // Classic 1.60: world scaling (WorldScale.h) - a scaled-up creature's health is a fraction of what it shows, so a hit
+        // is a fraction of a point of it per point of damage; carry the remainder to the next hit instead of dropping it
+        // (a level 2 creature shown at level 5 lost up to 2 shown points a hit, and the client's health bar drifted)
+        Creature* worldScaledVictim = victim->ToCreature();
+        if (worldScaledVictim && worldScaledVictim->IsWorldScaled())
+        {
+            float const multiplier = victim->GetHealthMultiplierForTarget(attacker);
+            float const exact = float(damage) / multiplier + worldScaledVictim->GetWorldScaleDamageCarry();
+            damageTaken = uint32(exact);
+            worldScaledVictim->SetWorldScaleDamageCarry(exact - float(damageTaken));
+            TC_LOG_DEBUG("entities.unit", "World scaling: {} takes {} from {} (x1/{:.3f}, carry {:.2f}): {} of {} health",
+                victim->GetName(), damage, attacker->GetName(), multiplier, exact - float(damageTaken), damageTaken, victim->GetHealth());
+        }
+        else
+            damageTaken = damage / victim->GetHealthMultiplierForTarget(attacker);
+    }
 
     // call script hooks
     {

@@ -3208,6 +3208,7 @@ void Creature::ApplyLevelScaling()
         // World scaling (WorldScale.h): the ContentTuning row "this level to 60", so the client shows each player the
         // creature at their own level and GetLevelForTarget scales it for them; the creature itself stays at this level
         m_worldScaled = false;
+        m_worldScaleDamageCarry = 0.0f;
         if (WorldScale::CanScale(this, level))
         {
             int32 const contentTuningId = WorldScale::ContentTuningBase + level;
