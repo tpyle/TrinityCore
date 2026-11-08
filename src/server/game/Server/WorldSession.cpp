@@ -947,9 +947,20 @@ void WorldSession::SendAccountDataTimes(ObjectGuid playerGuid, uint32 mask)
     WorldPackets::ClientConfig::AccountDataTimes accountDataTimes;
     accountDataTimes.PlayerGuid = playerGuid;
     accountDataTimes.ServerTime = GameTime::GetSystemTime();
+    // Classic 1.60 (WoW Forever client): when the stored time equals its own, the client keeps its local copy, which it does not
+    // keep current (keybinds changed and uploaded at logout were back to defaults at the next login). Present stored data as
+    // current so the client always loads it from the server; its own later uploads still replace it.
+    time_t const now = GameTime::GetGameTime();
     for (uint32 i = 0; i < NUM_ACCOUNT_DATA_TYPES; ++i)
-        if (mask & (1 << i))
-            accountDataTimes.AccountTimes[i] = GetAccountData(AccountDataType(i))->Time;
+    {
+        if (!(mask & (1 << i)))
+            continue;
+
+        AccountData& data = _accountData[i];
+        if (!data.Data.empty() && data.Time < now)
+            data.Time = now;
+        accountDataTimes.AccountTimes[i] = data.Time;
+    }
 
     SendPacket(accountDataTimes.Write());
 }
