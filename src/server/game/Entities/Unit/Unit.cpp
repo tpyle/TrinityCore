@@ -92,6 +92,7 @@
 #include "Vignette.h"
 #include "VignettePackets.h"
 #include "World.h"
+#include "WorldScale.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include <queue>
@@ -5685,7 +5686,12 @@ void Unit::SendSpellNonMeleeDamageLog(SpellNonMeleeDamage const* log)
     packet.Visual = log->SpellVisual;
     packet.Damage = log->damage;
     packet.OriginalDamage = log->originalDamage;
-    if (log->damage > log->preHitHealth)
+    // World scaling: sent after the damage, so whether the hit killed is known; the overkill is in the attacker's points
+    Creature const* worldScaledTarget = log->target->ToCreature();
+    if (log->attacker && worldScaledTarget && worldScaledTarget->IsWorldScaled())
+        packet.Overkill = log->target->IsAlive() ? -1
+            : std::max<int32>(0, int32(log->damage) - int32(std::lround(log->preHitHealth * log->target->GetHealthMultiplierForTarget(log->attacker))));
+    else if (log->damage > log->preHitHealth)
         packet.Overkill = log->damage - log->preHitHealth;
     else
         packet.Overkill = -1;
@@ -5792,8 +5798,8 @@ void Unit::SendAttackStateUpdate(CalcDamageInfo* damageInfo)
     packet.VictimGUID = damageInfo->Target->GetGUID();
     packet.Damage = damageInfo->Damage;
     packet.OriginalDamage = damageInfo->OriginalDamage;
-    int32 overkill = damageInfo->Damage - damageInfo->Target->GetHealth();
-    packet.OverDamage = (overkill < 0 ? -1 : overkill);
+    int64 overkill = WorldScale::DamageBeyondHealth(damageInfo->Target, damageInfo->Attacker, damageInfo->Damage, damageInfo->Target->GetHealth());
+    packet.OverDamage = (overkill < 0 ? -1 : int32(overkill));
 
     packet.SubDmg.emplace();
     packet.SubDmg->SchoolMask = damageInfo->DamageSchoolMask;   // School of sub damage

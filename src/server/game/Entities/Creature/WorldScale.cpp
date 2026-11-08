@@ -94,4 +94,18 @@ namespace WorldScale
 
         return original + uint32(std::lround(double(scaled - original) * double(std::clamp(fraction, 0.0f, 1.0f))));
     }
+
+    int64 DamageBeyondHealth(Unit const* victim, Unit const* attacker, uint32 damage, uint64 health)
+    {
+        Creature const* creature = victim->ToCreature();
+        if (!attacker || !creature || !creature->IsWorldScaled())
+            return int64(damage) - int64(health);
+
+        float const multiplier = victim->GetHealthMultiplierForTarget(attacker);
+        double const taken = double(damage) / multiplier + creature->GetWorldScaleDamageCarry();
+        if (taken < double(health))
+            return -1;
+
+        return std::llround((taken - double(health)) * multiplier);
+    }
 }

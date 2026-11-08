@@ -16,6 +16,7 @@
 #include "Define.h"
 
 class Creature;
+class Unit;
 class WorldObject;
 
 namespace WorldScale
@@ -50,6 +51,11 @@ namespace WorldScale
 
     // original + fraction of the way to scaled (never less than original)
     uint32 BlendXP(uint32 original, uint32 scaled, float fraction);
+
+    // Combat log overkill of a hit not yet dealt: damage minus the victim's health, in the attacker's points. On a scaled victim
+    // the attacker sees health x multiplier and the hit takes damage / multiplier (plus the carried fraction, see Unit::DealDamage),
+    // so the plain damage - health would report overkill on hits it survives and the client would empty its health bar.
+    int64 DamageBeyondHealth(Unit const* victim, Unit const* attacker, uint32 damage, uint64 health);
 }
 
 #endif // TRINITY_WORLDSCALE_H

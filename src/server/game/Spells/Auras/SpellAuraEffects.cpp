@@ -46,6 +46,7 @@
 #include "ThreatManager.h"
 #include "Unit.h"
 #include "Util.h"
+#include "WorldScale.h"
 #include "Vehicle.h"
 #include "Weather.h"
 #include "WorldPacket.h"
@@ -5735,9 +5736,7 @@ void AuraEffect::HandlePeriodicDamageAurasTick(Unit* target, Unit* caster) const
         procVictim |= PROC_FLAG_TAKE_ANY_DAMAGE;
     }
 
-    int32 overkill = damage - target->GetHealth();
-    if (overkill < 0)
-        overkill = 0;
+    int32 overkill = int32(std::max<int64>(0, WorldScale::DamageBeyondHealth(target, caster, damage, target->GetHealth())));
 
     SpellPeriodicAuraLogInfo pInfo(this, damage, dmg, overkill, absorb, resist, 0.0f, crit);
 
