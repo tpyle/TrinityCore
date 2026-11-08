@@ -108,4 +108,16 @@ namespace WorldScale
 
         return std::llround((taken - double(health)) * multiplier);
     }
+
+    int64 HealthAfterHitSeenBy(Unit const* victim, Unit const* attacker, uint32 damage)
+    {
+        uint64 const health = victim->GetHealth();
+        Creature const* creature = victim->ToCreature();
+        if (!attacker || !creature || !creature->IsWorldScaled())
+            return int64(health) - int64(std::min<uint64>(health, damage));
+
+        float const multiplier = victim->GetHealthMultiplierForTarget(attacker);
+        uint64 const taken = uint64(double(damage) / multiplier + creature->GetWorldScaleDamageCarry());
+        return std::llround(double(health - std::min(health, taken)) * multiplier);
+    }
 }

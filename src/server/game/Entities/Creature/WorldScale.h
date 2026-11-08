@@ -56,6 +56,10 @@ namespace WorldScale
     // the attacker sees health x multiplier and the hit takes damage / multiplier (plus the carried fraction, see Unit::DealDamage),
     // so the plain damage - health would report overkill on hits it survives and the client would empty its health bar.
     int64 DamageBeyondHealth(Unit const* victim, Unit const* attacker, uint32 damage, uint64 health);
+
+    // The victim's health after a hit of damage not yet dealt, as the attacker sees it (scaled up for a scaled victim). The client
+    // takes the health in a swing's combat log as already scaled, so the real health there jolted its health bar on every swing.
+    int64 HealthAfterHitSeenBy(Unit const* victim, Unit const* attacker, uint32 damage);
 }
 
 #endif // TRINITY_WORLDSCALE_H

@@ -5837,6 +5837,9 @@ void Unit::SendAttackStateUpdate(CalcDamageInfo* damageInfo)
         landed.RageGained = packet.RageGained;
         landed.ContentTuning = packet.ContentTuning;
         landed.LogData.Initialize(damageInfo->Target);
+        // World scaling: the client shows this health as is, so give a scaled creature's health as the attacker sees it once hit
+        if (Creature const* worldScaledTarget = damageInfo->Target->ToCreature(); worldScaledTarget && worldScaledTarget->IsWorldScaled())
+            landed.LogData.Health = WorldScale::HealthAfterHitSeenBy(damageInfo->Target, damageInfo->Attacker, damageInfo->Damage);
         landed.Write();
 
         WorldPacket const* round = landed.GetFullLogPacket();
