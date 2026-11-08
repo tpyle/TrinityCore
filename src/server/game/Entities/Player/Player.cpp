@@ -14694,9 +14694,12 @@ void Player::PrepareGossipMenu(WorldObject* source, uint32 menuId, bool showQues
                     if (!HasPlayerFlag(PLAYER_FLAGS_NO_XP_GAIN) || IsMaxLevel())
                         canTalk = false;
                     break;
+                case GossipOptionNpc::Trainer:
+                    if (!creature->CanTrainPlayerClass(this))
+                        canTalk = false;
+                    break;
                 case GossipOptionNpc::None:
                 case GossipOptionNpc::Vendor:
-                case GossipOptionNpc::Trainer:
                 case GossipOptionNpc::Binder:
                 case GossipOptionNpc::Banker:
                 case GossipOptionNpc::PetitionVendor:
@@ -14758,7 +14761,8 @@ void Player::PrepareGossipMenu(WorldObject* source, uint32 menuId, bool showQues
             return false;
         };
 
-        if (creature->HasNpcFlag(UNIT_NPC_FLAG_TRAINER) && creature->GetTrainerId() && !hasOption(GossipOptionNpc::Trainer))
+        if (creature->HasNpcFlag(UNIT_NPC_FLAG_TRAINER) && creature->GetTrainerId() && !hasOption(GossipOptionNpc::Trainer)
+            && creature->CanTrainPlayerClass(this))
             menu.AddMenuItem(CLASSIC_GOSSIP_OPTION_AUTO_TRAINER, menu.GetMenuItemCount(), GossipOptionNpc::Trainer, "Train me.", 0,
                 GossipOptionFlags::None, {}, 0, 0, false, 0, "", {}, {}, menuId, menu.GetMenuItemCount());
 

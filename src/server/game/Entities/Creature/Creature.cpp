@@ -1355,6 +1355,13 @@ bool Creature::CanResetTalents(Player* player) const
         && player->GetClass() == GetCreatureTemplate()->trainer_class;
 }
 
+// Classic 1.60: a class trainer only trains its own class; others just get its greeting (trainer_class 0: anyone)
+bool Creature::CanTrainPlayerClass(Player const* player) const
+{
+    uint32 trainerClass = GetCreatureTemplate()->trainer_class;
+    return !trainerClass || player->GetClass() == trainerClass;
+}
+
 uint32 Creature::GetLootId() const
 {
     if (m_lootId)

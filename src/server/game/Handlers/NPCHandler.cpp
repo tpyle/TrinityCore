@@ -115,6 +115,9 @@ void WorldSession::SendTrainerList(Creature* npc, uint32 trainerId)
     if (GetPlayer()->HasUnitState(UNIT_STATE_DIED))
         GetPlayer()->RemoveAurasByType(SPELL_AURA_FEIGN_DEATH);
 
+    if (!npc->CanTrainPlayerClass(_player))
+        return;
+
     Trainer::Trainer const* trainer = sObjectMgr->GetTrainer(trainerId);
     if (!trainer)
     {
@@ -140,6 +143,9 @@ void WorldSession::HandleTrainerBuySpellOpcode(WorldPackets::NPC::TrainerBuySpel
         TC_LOG_DEBUG("network", "WORLD: HandleTrainerBuySpellOpcode - {} not found or you can not interact with him.", packet.TrainerGUID.ToString());
         return;
     }
+
+    if (!npc->CanTrainPlayerClass(_player))
+        return;
 
     // remove fake death
     if (GetPlayer()->HasUnitState(UNIT_STATE_DIED))
