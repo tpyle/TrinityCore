@@ -29,7 +29,7 @@ namespace WorldScale
         bool AffectWorldBosses = false; // creatures flagged as boss mobs (world and dungeon bosses)
         float MinMultiplier = 0.05f;
         float MaxMultiplier = 20.0f;
-        float KillXPFraction = 0.5f;    // how far from the creature's own kill experience towards the scaled one to pay
+        float KillXPFraction = 0.5f;    // how far from the creature's at-its-own-level kill experience towards the player's to pay
         uint32 AggroLevelsBelow = 5;    // a scaled-up creature aggroes as if this many levels below the player
     };
 

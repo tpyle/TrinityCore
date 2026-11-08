@@ -187,10 +187,11 @@ namespace Trinity
                 uint8 const levelForPlayer = u->GetLevelForTarget(player);
                 gain = BaseGain(player->GetLevel(), levelForPlayer);
 
-                // Classic 1.60: world scaling (WorldScale.h) - a creature scaled up to the player's level pays only part of the
-                // way from its own kill experience (none for a grey one) towards that of a creature of the player's level
+                // Classic 1.60: world scaling (WorldScale.h) - a creature scaled up to the player's level pays part of the way
+                // from what it pays a player of its own level towards what a creature of the player's level pays them: at 0.5
+                // a level 1 creature pays a level 5 player 60, half way from 50 (level 1 vs 1) to 70 (5 vs 5)
                 if (creature && creature->IsWorldScaled() && levelForPlayer != creature->GetLevel())
-                    gain = WorldScale::BlendXP(BaseGain(player->GetLevel(), creature->GetLevel()), gain, WorldScale::GetConfig().KillXPFraction);
+                    gain = WorldScale::BlendXP(BaseGain(creature->GetLevel(), creature->GetLevel()), gain, WorldScale::GetConfig().KillXPFraction);
 
                 if (gain && creature)
                 {
