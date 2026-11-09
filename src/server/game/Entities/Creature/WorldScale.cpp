@@ -34,6 +34,8 @@ namespace WorldScale
         config.MaxMultiplier     = sConfigMgr->GetFloatDefault("WorldScale.MaxMultiplier", 20.0f);
         config.KillXPFraction    = std::clamp(sConfigMgr->GetFloatDefault("WorldScale.KillXPFraction", 0.5f), 0.0f, 1.0f);
         config.AggroLevelsBelow  = sConfigMgr->GetIntDefault("WorldScale.Aggro.LevelsBelow", 5);
+        config.DebugChat         = sConfigMgr->GetBoolDefault("WorldScale.Debug.Chat", false);
+        config.DebugSwingLog     = sConfigMgr->GetIntDefault("WorldScale.Debug.SwingLog", 1);
 
         if (config.MinMultiplier <= 0.0f)
             config.MinMultiplier = 0.05f;
@@ -95,6 +97,12 @@ namespace WorldScale
         return original + uint32(std::lround(double(scaled - original) * double(std::clamp(fraction, 0.0f, 1.0f))));
     }
 
+    double ExactDamageTaken(Creature const* creature, Unit const* attacker, uint32 damage)
+    {
+        // the small addition keeps a hit that should take a whole number of points (9.9999...) from losing one to rounding
+        return double(damage) / double(creature->GetHealthMultiplierForTarget(attacker)) + double(creature->GetWorldScaleDamageCarry()) + 1e-4;
+    }
+
     int64 DamageBeyondHealth(Unit const* victim, Unit const* attacker, uint32 damage, uint64 health)
     {
         Creature const* creature = victim->ToCreature();
@@ -102,7 +110,7 @@ namespace WorldScale
             return int64(damage) - int64(health);
 
         float const multiplier = victim->GetHealthMultiplierForTarget(attacker);
-        double const taken = double(damage) / multiplier + creature->GetWorldScaleDamageCarry();
+        double const taken = ExactDamageTaken(creature, attacker, damage);
         if (taken < double(health))
             return -1;
 
@@ -117,7 +125,7 @@ namespace WorldScale
             return int64(health) - int64(std::min<uint64>(health, damage));
 
         float const multiplier = victim->GetHealthMultiplierForTarget(attacker);
-        uint64 const taken = uint64(double(damage) / multiplier + creature->GetWorldScaleDamageCarry());
+        uint64 const taken = uint64(ExactDamageTaken(creature, attacker, damage));
         return std::llround(double(health - std::min(health, taken)) * multiplier);
     }
 }

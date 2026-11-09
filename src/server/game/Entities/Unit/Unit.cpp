@@ -27,6 +27,7 @@
 #include "CellImpl.h"
 #include "CharacterCache.h"
 #include "CharmInfo.h"
+#include "Chat.h"
 #include "ChatPackets.h"
 #include "ChatTextBuilder.h"
 #include "CombatLogPackets.h"
@@ -841,11 +842,21 @@ bool Unit::HasBreakableByDamageCrowdControlAura(Unit const* excludeCasterChannel
         if (worldScaledVictim && worldScaledVictim->IsWorldScaled())
         {
             float const multiplier = victim->GetHealthMultiplierForTarget(attacker);
-            float const exact = float(damage) / multiplier + worldScaledVictim->GetWorldScaleDamageCarry();
+            double const exact = WorldScale::ExactDamageTaken(worldScaledVictim, attacker, damage);
             damageTaken = uint32(exact);
-            worldScaledVictim->SetWorldScaleDamageCarry(exact - float(damageTaken));
+            worldScaledVictim->SetWorldScaleDamageCarry(float(exact - double(damageTaken)));
             TC_LOG_DEBUG("entities.unit", "World scaling: {} takes {} from {} (x1/{:.3f}, carry {:.2f}): {} of {} health",
-                victim->GetName(), damage, attacker->GetName(), multiplier, exact - float(damageTaken), damageTaken, victim->GetHealth());
+                victim->GetName(), damage, attacker->GetName(), multiplier, exact - double(damageTaken), damageTaken, victim->GetHealth());
+            if (WorldScale::GetConfig().DebugChat)
+            {
+                if (Player* player = attacker->GetCharmerOrOwnerPlayerOrPlayerItself())
+                {
+                    uint32 const before = victim->GetHealth();
+                    uint32 const after = before - std::min(before, damageTaken);
+                    ChatHandler(player->GetSession()).PSendSysMessage("[scale] {}: {} damage, real {} -> {}, you see {} -> {}",
+                        victim->GetName(), damage, before, after, std::lround(before * multiplier), std::lround(after * multiplier));
+                }
+            }
         }
         else
             damageTaken = damage / victim->GetHealthMultiplierForTarget(attacker);
@@ -5838,8 +5849,14 @@ void Unit::SendAttackStateUpdate(CalcDamageInfo* damageInfo)
         landed.ContentTuning = packet.ContentTuning;
         landed.LogData.Initialize(damageInfo->Target);
         // World scaling: the client shows this health as is, so give a scaled creature's health as the attacker sees it once hit
+        bool sendLanded = true;
         if (Creature const* worldScaledTarget = damageInfo->Target->ToCreature(); worldScaledTarget && worldScaledTarget->IsWorldScaled())
-            landed.LogData.Health = WorldScale::HealthAfterHitSeenBy(damageInfo->Target, damageInfo->Attacker, damageInfo->Damage);
+        {
+            uint32 const mode = WorldScale::GetConfig().DebugSwingLog;
+            if (mode == 1)
+                landed.LogData.Health = WorldScale::HealthAfterHitSeenBy(damageInfo->Target, damageInfo->Attacker, damageInfo->Damage);
+            sendLanded = mode != 0;
+        }
         landed.Write();
 
         WorldPacket const* round = landed.GetFullLogPacket();
@@ -5847,7 +5864,7 @@ void Unit::SendAttackStateUpdate(CalcDamageInfo* damageInfo)
         landedLog << uint32(0);
         landedLog.append(round->data(), round->size());
         for (Unit* unit : { damageInfo->Attacker, damageInfo->Target })
-            if (Player* player = unit->ToPlayer())
+            if (Player* player = unit->ToPlayer(); player && sendLanded)
                 player->SendDirectMessage(&landedLog);
     }
 
