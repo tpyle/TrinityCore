@@ -32,10 +32,6 @@ namespace WorldScale
         float MaxMultiplier = 20.0f;
         float KillXPFraction = 0.5f;    // how far from the creature's at-its-own-level kill experience towards the player's to pay
         uint32 AggroLevelsBelow = 5;    // a scaled-up creature aggroes as if this many levels below the player
-        // Testing aids (WorldScale.Debug.*, take effect on .reload config): tell the attacking player each hit's health, and what
-        // the swing combat log gives as a scaled creature's health (0 not sent, 1 as the attacker sees it after the hit, 2 real)
-        bool DebugChat = false;
-        uint32 DebugSwingLog = 1;
     };
 
     // ContentTuning rows ContentTuningBase + N (N = 1..59): levels N to 60 (custom-sql 055)
@@ -63,10 +59,6 @@ namespace WorldScale
     double ExactDamageTaken(Creature const* creature, Unit const* attacker, uint32 damage);
 
     int64 DamageBeyondHealth(Unit const* victim, Unit const* attacker, uint32 damage, uint64 health);
-
-    // The victim's health after a hit of damage not yet dealt, as the attacker sees it (scaled up for a scaled victim). The client
-    // takes the health in a swing's combat log as already scaled, so the real health there jolted its health bar on every swing.
-    int64 HealthAfterHitSeenBy(Unit const* victim, Unit const* attacker, uint32 damage);
 }
 
 #endif // TRINITY_WORLDSCALE_H

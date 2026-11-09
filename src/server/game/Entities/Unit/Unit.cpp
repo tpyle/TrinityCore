@@ -847,16 +847,6 @@ bool Unit::HasBreakableByDamageCrowdControlAura(Unit const* excludeCasterChannel
             worldScaledVictim->SetWorldScaleDamageCarry(float(exact - double(damageTaken)));
             TC_LOG_DEBUG("entities.unit", "World scaling: {} takes {} from {} (x1/{:.3f}, carry {:.2f}): {} of {} health",
                 victim->GetName(), damage, attacker->GetName(), multiplier, exact - double(damageTaken), damageTaken, victim->GetHealth());
-            if (WorldScale::GetConfig().DebugChat)
-            {
-                if (Player* player = attacker->GetCharmerOrOwnerPlayerOrPlayerItself())
-                {
-                    uint32 const before = victim->GetHealth();
-                    uint32 const after = before - std::min(before, damageTaken);
-                    ChatHandler(player->GetSession()).SendSysMessage(Trinity::StringFormat("[scale] {}: {} damage, real {} -> {}, you see {} -> {}",
-                        victim->GetName(), damage, before, after, std::lround(before * multiplier), std::lround(after * multiplier)));
-                }
-            }
         }
         else
             damageTaken = damage / victim->GetHealthMultiplierForTarget(attacker);
@@ -5832,8 +5822,13 @@ void Unit::SendAttackStateUpdate(CalcDamageInfo* damageInfo)
     SendCombatLogMessage(&packet);
 
     // Classic 1.60: the official server follows every swing with SMSG_ATTACK_SWING_LANDED_LOG to the players in it (sniff 70205:
-    // uint32 0, then the same swing with the victim's log data); the client's combat log swing events use it
-    if (damageInfo->Attacker->GetTypeId() == TYPEID_PLAYER || damageInfo->Target->GetTypeId() == TYPEID_PLAYER)
+    // uint32 0, then the same swing with the victim's log data); the client's combat log swing events use it.
+    // World scaling: not for a scaled creature hit. The client puts the victim health in it on its health bar in place of its own
+    // scaled reading of the creature's health, which jumped every so often to the real (unscaled) value. The combat log is complete
+    // without it.
+    Creature const* worldScaledTarget = damageInfo->Target->ToCreature();
+    if ((damageInfo->Attacker->GetTypeId() == TYPEID_PLAYER || damageInfo->Target->GetTypeId() == TYPEID_PLAYER)
+        && !(worldScaledTarget && worldScaledTarget->IsWorldScaled()))
     {
         WorldPackets::CombatLog::AttackerStateUpdate landed;
         landed.Flags = packet.Flags;
@@ -5848,15 +5843,6 @@ void Unit::SendAttackStateUpdate(CalcDamageInfo* damageInfo)
         landed.RageGained = packet.RageGained;
         landed.ContentTuning = packet.ContentTuning;
         landed.LogData.Initialize(damageInfo->Target);
-        // World scaling: the client shows this health as is, so give a scaled creature's health as the attacker sees it once hit
-        bool sendLanded = true;
-        if (Creature const* worldScaledTarget = damageInfo->Target->ToCreature(); worldScaledTarget && worldScaledTarget->IsWorldScaled())
-        {
-            uint32 const mode = WorldScale::GetConfig().DebugSwingLog;
-            if (mode == 1)
-                landed.LogData.Health = WorldScale::HealthAfterHitSeenBy(damageInfo->Target, damageInfo->Attacker, damageInfo->Damage);
-            sendLanded = mode != 0;
-        }
         landed.Write();
 
         WorldPacket const* round = landed.GetFullLogPacket();
@@ -5864,7 +5850,7 @@ void Unit::SendAttackStateUpdate(CalcDamageInfo* damageInfo)
         landedLog << uint32(0);
         landedLog.append(round->data(), round->size());
         for (Unit* unit : { damageInfo->Attacker, damageInfo->Target })
-            if (Player* player = unit->ToPlayer(); player && sendLanded)
+            if (Player* player = unit->ToPlayer())
                 player->SendDirectMessage(&landedLog);
     }
 

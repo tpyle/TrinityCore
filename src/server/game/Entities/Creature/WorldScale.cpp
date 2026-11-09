@@ -34,8 +34,6 @@ namespace WorldScale
         config.MaxMultiplier     = sConfigMgr->GetFloatDefault("WorldScale.MaxMultiplier", 20.0f);
         config.KillXPFraction    = std::clamp(sConfigMgr->GetFloatDefault("WorldScale.KillXPFraction", 0.5f), 0.0f, 1.0f);
         config.AggroLevelsBelow  = sConfigMgr->GetIntDefault("WorldScale.Aggro.LevelsBelow", 5);
-        config.DebugChat         = sConfigMgr->GetBoolDefault("WorldScale.Debug.Chat", false);
-        config.DebugSwingLog     = sConfigMgr->GetIntDefault("WorldScale.Debug.SwingLog", 1);
 
         if (config.MinMultiplier <= 0.0f)
             config.MinMultiplier = 0.05f;
@@ -115,17 +113,5 @@ namespace WorldScale
             return -1;
 
         return std::llround((taken - double(health)) * multiplier);
-    }
-
-    int64 HealthAfterHitSeenBy(Unit const* victim, Unit const* attacker, uint32 damage)
-    {
-        uint64 const health = victim->GetHealth();
-        Creature const* creature = victim->ToCreature();
-        if (!attacker || !creature || !creature->IsWorldScaled())
-            return int64(health) - int64(std::min<uint64>(health, damage));
-
-        float const multiplier = victim->GetHealthMultiplierForTarget(attacker);
-        uint64 const taken = uint64(ExactDamageTaken(creature, attacker, damage));
-        return std::llround(double(health - std::min(health, taken)) * multiplier);
     }
 }
