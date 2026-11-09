@@ -40,7 +40,7 @@ namespace WorldPackets::Quest
     struct QuestRewards;
 }
 
-#define MAX_QUEST_LOG_SIZE 35
+#define MAX_QUEST_LOG_SIZE 40                               // Classic 1.60: the Forever client allows 40 (retail 35)
 
 #define QUEST_ITEM_DROP_COUNT 4
 #define QUEST_REWARD_CHOICES_COUNT 6
