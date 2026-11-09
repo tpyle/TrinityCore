@@ -27,6 +27,7 @@
 #include "Player.h"
 #include "Scenario.h"
 #include "SpellAuraEffects.h"
+#include "WorldScale.h"
 #include <boost/container/small_vector.hpp>
 
  // == KillRewarder ====================================================
@@ -153,8 +154,8 @@ inline void KillRewarder::_RewardXP(Player* player, float rate)
         xp *= player->GetTotalAuraMultiplier(SPELL_AURA_MOD_XP_PCT);
         xp *= player->GetTotalAuraMultiplierByMiscValue(SPELL_AURA_MOD_XP_FROM_CREATURE_TYPE, int32(_victim->GetCreatureType()));
 
-        // 4.2.3. Give XP to player.
-        player->GiveXP(xp, _victim, _groupRate);
+        // 4.2.3. Give XP to player (the group rate only feeds the "group bonus" figure in the message)
+        player->GiveXP(xp, _victim, WorldScale::GetConfig().GroupXPSplit ? _groupRate : 1.0f);
         if (Pet* pet = player->GetPet())
             // 4.2.4. If player has pet, reward pet with XP (100% for single player, 50% for group case).
             pet->GivePetXP(player->GetGroup() ? xp / 2 : xp);
@@ -200,8 +201,9 @@ void KillRewarder::_RewardPlayer(Player* player, bool isDungeon)
             _groupRate * float(player->GetLevel()) / _sumLevel : // Group rate depends on summary level.
             1.0f;                                                // Personal rate is 100%.
         if (_xp)
-            // 4.2. Give XP.
-            _RewardXP(player, rate);
+            // 4.2. Give XP. WorldScale.GroupXPSplit off: each member earns what they would alone (the anti power levelling
+            //      rules stay: nothing for a victim that is gray to them)
+            _RewardXP(player, WorldScale::GetConfig().GroupXPSplit ? rate : 1.0f);
         if (!_isBattleGround)
         {
             // If killer is in dungeon then all members receive full reputation at kill.

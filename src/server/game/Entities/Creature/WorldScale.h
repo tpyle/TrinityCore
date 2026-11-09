@@ -36,6 +36,7 @@ namespace WorldScale
         uint32 AggroLevelsBelow = 5;    // a scaled-up creature aggroes as if this many levels below the player
         bool Quests = true;             // quest experience below the player's level (custom-sql 057 makes the client show the level)
         float QuestXPFraction = 0.5f;   // how far from the quest's at-its-own-level experience towards the player's to pay
+        bool GroupXPSplit = true;       // share a kill's experience across the group (false: each member earns what they would alone)
     };
 
     // ContentTuning rows ContentTuningBase + N (N = 1..59): levels N to 60 (custom-sql 055)
