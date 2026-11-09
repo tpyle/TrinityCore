@@ -16,6 +16,8 @@
 #include "Define.h"
 
 class Creature;
+class Player;
+class Quest;
 class Unit;
 class WorldObject;
 
@@ -32,10 +34,19 @@ namespace WorldScale
         float MaxMultiplier = 20.0f;
         float KillXPFraction = 0.5f;    // how far from the creature's at-its-own-level kill experience towards the player's to pay
         uint32 AggroLevelsBelow = 5;    // a scaled-up creature aggroes as if this many levels below the player
+        bool Quests = true;             // quest experience below the player's level (custom-sql 057 makes the client show the level)
+        float QuestXPFraction = 0.5f;   // how far from the quest's at-its-own-level experience towards the player's to pay
     };
 
     // ContentTuning rows ContentTuningBase + N (N = 1..59): levels N to 60 (custom-sql 055)
     constexpr int32 ContentTuningBase = 8100000;
+
+    // Whether a quest is on one of those rows (custom-sql 057: vanilla quests of level N). The client shows such a quest at the
+    // player's level, never below its own; the server keeps the quest's fixed level for its rewards.
+    bool IsScaledQuest(Quest const* quest);
+
+    // The quest level the client shows player: theirs for a scaled quest below them, else the quest's own
+    int32 GetShownQuestLevel(Player const* player, Quest const* quest);
 
     Config const& GetConfig();
     void LoadConfig();

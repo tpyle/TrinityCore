@@ -29,6 +29,7 @@
 #include "QuestPools.h"
 #include "SpellMgr.h"
 #include "World.h"
+#include "WorldScale.h"
 #include "WorldSession.h"
 
 #define QUEST_TEMPLATE_FIELDS (ID)(QuestType)(QuestPackageID)(ContentTuningID)(QuestSortID)(QuestInfoID)(SuggestedGroupNum)(RewardNextQuest)(RewardXPDifficulty)\
@@ -428,7 +429,26 @@ void Quest::LoadRewardHouseDecor(Field* fields)
 uint32 Quest::XPValue(Player const* player) const
 {
     // Classic 1.60: the quest's fixed level (without it quests with no ContentTuning gave no XP)
-    return XPValue(player, GetContentTuningId(), _rewardXPDifficulty, _rewardXPMultiplier, _expansion, player ? player->GetQuestLevel(this) : 0);
+    int32 const questLevel = player ? player->GetQuestLevel(this) : 0;
+    uint32 xp = XPValue(player, GetContentTuningId(), _rewardXPDifficulty, _rewardXPMultiplier, _expansion, questLevel);
+
+    // World scaling (WorldScale.h): a scaled quest below the player pays part of the way (QuestXPFraction) from what it pays a
+    // player of its own level to what a quest of the player's level pays them, never less than it would unscaled
+    WorldScale::Config const& worldScale = WorldScale::GetConfig();
+    if (player && worldScale.Enable && worldScale.Quests && questLevel > 0 && questLevel < int32(player->GetLevel())
+        && WorldScale::IsScaledQuest(this) && _rewardXPDifficulty < 10)
+    {
+        QuestXPEntry const* ownLevelXp = sQuestXPStore.LookupEntry(questLevel);
+        ContentTuningEntry const* contentTuning = sContentTuningStore.LookupEntry(GetContentTuningId());
+        if (ownLevelXp && contentTuning)
+        {
+            uint32 const atOwnLevel = uint32(std::ceil(ownLevelXp->Difficulty[_rewardXPDifficulty] * contentTuning->QuestXpMultiplier * _rewardXPMultiplier));
+            uint32 const atPlayerLevel = XPValue(player, GetContentTuningId(), _rewardXPDifficulty, _rewardXPMultiplier, _expansion, player->GetLevel());
+            xp = std::max(xp, WorldScale::BlendXP(atOwnLevel, atPlayerLevel, worldScale.QuestXPFraction));
+        }
+    }
+
+    return xp;
 }
 
 uint32 Quest::XPValue(Player const* player, uint32 contentTuningId, uint32 xpDifficulty, float xpMultiplier /*= 1.0f*/, int32 expansion /*= -1*/, int32 questLevelOverride /*= 0*/)
@@ -488,7 +508,13 @@ uint32 Quest::MaxMoneyValue() const
         return uint32(std::max(_classicMoney, 0));
 
     uint32 value = 0;
-    if (Optional<ContentTuningLevels> questLevels = sDB2Manager.GetContentTuningData(GetContentTuningId(), {}))
+    // Classic 1.60: the quest's fixed level, as MoneyValue (a scaled quest's ContentTuning runs to 60, see WorldScale.h)
+    if (_classicQuestLevel > 0)
+    {
+        if (QuestMoneyRewardEntry const* money = sQuestMoneyRewardStore.LookupEntry(_classicQuestLevel))
+            value = money->Difficulty[GetRewMoneyDifficulty()] * GetMoneyMultiplier();
+    }
+    else if (Optional<ContentTuningLevels> questLevels = sDB2Manager.GetContentTuningData(GetContentTuningId(), {}))
         if (QuestMoneyRewardEntry const* money = sQuestMoneyRewardStore.LookupEntry(questLevels->MaxLevel))
             value = money->Difficulty[GetRewMoneyDifficulty()] * GetMoneyMultiplier();
 

@@ -8,6 +8,7 @@
 #include "Log.h"
 #include "Map.h"
 #include "Player.h"
+#include "QuestDef.h"
 #include <algorithm>
 #include <cmath>
 
@@ -34,15 +35,17 @@ namespace WorldScale
         config.MaxMultiplier     = sConfigMgr->GetFloatDefault("WorldScale.MaxMultiplier", 20.0f);
         config.KillXPFraction    = std::clamp(sConfigMgr->GetFloatDefault("WorldScale.KillXPFraction", 0.5f), 0.0f, 1.0f);
         config.AggroLevelsBelow  = sConfigMgr->GetIntDefault("WorldScale.Aggro.LevelsBelow", 5);
+        config.Quests            = sConfigMgr->GetBoolDefault("WorldScale.Quests", true);
+        config.QuestXPFraction   = std::clamp(sConfigMgr->GetFloatDefault("WorldScale.QuestXPFraction", 0.5f), 0.0f, 1.0f);
 
         if (config.MinMultiplier <= 0.0f)
             config.MinMultiplier = 0.05f;
         if (config.MaxMultiplier < config.MinMultiplier)
             config.MaxMultiplier = config.MinMultiplier;
 
-        TC_LOG_INFO("server.loading", "World scaling: {} (dungeons {}, raids {}, elites {}, bosses {}, kill xp {}, aggro -{})",
+        TC_LOG_INFO("server.loading", "World scaling: {} (dungeons {}, raids {}, elites {}, bosses {}, kill xp {}, aggro -{}, quests {} xp {})",
             config.Enable ? "enabled" : "disabled", config.Dungeons, config.Raids, config.AffectElites, config.AffectWorldBosses,
-            config.KillXPFraction, config.AggroLevelsBelow);
+            config.KillXPFraction, config.AggroLevelsBelow, config.Quests, config.QuestXPFraction);
     }
 
     bool CanScale(Creature const* creature, uint8 level)
@@ -113,5 +116,20 @@ namespace WorldScale
             return -1;
 
         return std::llround((taken - double(health)) * multiplier);
+    }
+
+    bool IsScaledQuest(Quest const* quest)
+    {
+        int32 const contentTuningId = int32(quest->GetContentTuningId());
+        return contentTuningId > ContentTuningBase && contentTuningId < ContentTuningBase + 60;
+    }
+
+    int32 GetShownQuestLevel(Player const* player, Quest const* quest)
+    {
+        int32 const questLevel = player->GetQuestLevel(quest);
+        if (questLevel > 0 && IsScaledQuest(quest))
+            return std::max(questLevel, std::min(int32(player->GetLevel()), 60));
+
+        return questLevel;
     }
 }
