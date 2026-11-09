@@ -853,8 +853,8 @@ bool Unit::HasBreakableByDamageCrowdControlAura(Unit const* excludeCasterChannel
                 {
                     uint32 const before = victim->GetHealth();
                     uint32 const after = before - std::min(before, damageTaken);
-                    ChatHandler(player->GetSession()).PSendSysMessage("[scale] {}: {} damage, real {} -> {}, you see {} -> {}",
-                        victim->GetName(), damage, before, after, std::lround(before * multiplier), std::lround(after * multiplier));
+                    ChatHandler(player->GetSession()).SendSysMessage(Trinity::StringFormat("[scale] {}: {} damage, real {} -> {}, you see {} -> {}",
+                        victim->GetName(), damage, before, after, std::lround(before * multiplier), std::lround(after * multiplier)));
                 }
             }
         }
