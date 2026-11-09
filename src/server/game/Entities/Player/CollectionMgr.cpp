@@ -628,6 +628,18 @@ void CollectionMgr::AddItemAppearance(Item* item)
     AddItemAppearance(itemModifiedAppearance);
 }
 
+void CollectionMgr::AddItemAppearanceOnDisposal(Item* item)
+{
+    if (item->IsBOPTradeable() || item->IsRefundable())
+        return;
+
+    ItemModifiedAppearanceEntry const* itemModifiedAppearance = item->GetItemModifiedAppearance();
+    if (!CanAddAppearance(itemModifiedAppearance))
+        return;
+
+    AddItemAppearance(itemModifiedAppearance);
+}
+
 void CollectionMgr::AddItemAppearance(uint32 itemId, uint32 appearanceModId /*= 0*/)
 {
     ItemModifiedAppearanceEntry const* itemModifiedAppearance = TransmogMgr::GetItemModifiedAppearance(itemId, appearanceModId);

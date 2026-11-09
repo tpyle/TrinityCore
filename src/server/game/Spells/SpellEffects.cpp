@@ -27,6 +27,7 @@
 #include "CharmInfo.h"
 #include "CombatLogPackets.h"
 #include "CombatPackets.h"
+#include "CollectionMgr.h"
 #include "Common.h"
 #include "Conversation.h"
 #include "Creature.h"
@@ -3528,6 +3529,8 @@ void Spell::EffectDisEnchant()
     {
         if (!m_CastItem)
             caster->UpdateCraftSkill(m_spellInfo);
+
+        caster->GetSession()->GetCollectionMgr()->AddItemAppearanceOnDisposal(itemTarget);
 
         itemTarget->m_loot.reset(new Loot(caster->GetMap(), itemTarget->GetGUID(), LOOT_DISENCHANTING, nullptr));
         itemTarget->m_loot->FillLoot(*itemTarget->GetDisenchantLootId(), LootTemplates_Disenchant, caster, true);

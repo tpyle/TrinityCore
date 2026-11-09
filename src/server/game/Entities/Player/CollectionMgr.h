@@ -163,6 +163,9 @@ public:
     void LoadAccountItemAppearances(PreparedQueryResult knownAppearances, PreparedQueryResult favoriteAppearances);
     void SaveAccountItemAppearances(LoginDatabaseTransaction trans);
     void AddItemAppearance(Item* item);
+    // Classic 1.60: an item given up (sold to a vendor, disenchanted) is collected whatever its binding, so bind-on-equip gear
+    // need not be worn first
+    void AddItemAppearanceOnDisposal(Item* item);
     void AddItemAppearance(uint32 itemId, uint32 appearanceModId = 0);
     void AddTransmogSet(uint32 transmogSetId);
     bool IsSetCompleted(uint32 transmogSetId) const;

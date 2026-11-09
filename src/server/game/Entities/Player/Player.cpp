@@ -52,6 +52,7 @@
 #include "ClubUtils.h"
 #include "CombatLogPackets.h"
 #include "CombatPackets.h"
+#include "CollectionMgr.h"
 #include "Common.h"
 #include "ConditionMgr.h"
 #include "Containers.h"
@@ -24849,6 +24850,8 @@ Optional<SellResult> Player::SellItemToVendor(Item* item, uint32 amount)
 
     UpdateCriteria(CriteriaType::MoneyEarnedFromSales, money);
     UpdateCriteria(CriteriaType::SellItemsToVendors, 1);
+
+    GetSession()->GetCollectionMgr()->AddItemAppearanceOnDisposal(item);
 
     if (amount < item->GetCount()) // need split items
     {
