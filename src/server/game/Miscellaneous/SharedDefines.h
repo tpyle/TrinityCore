@@ -5946,6 +5946,7 @@ enum SkillType
     SKILL_RAPTOR_RIDING                             = 533,
     SKILL_MECHANOSTRIDER_PILOTING                   = 553,
     SKILL_UNDEAD_HORSEMANSHIP                       = 554,
+    SKILL_LOCKPICKING                               = 633,
     SKILL_PET_BAT                                   = 653,
     SKILL_PET_HYENA                                 = 654,
     SKILL_PET_BIRD_OF_PREY                          = 655,
@@ -6279,6 +6280,7 @@ constexpr SkillType SkillByLockType(LockType locktype)
         case LOCKTYPE_ARCHAEOLOGY:                    return SKILL_ARCHAEOLOGY;
         case LOCKTYPE_LUMBER_MILL:                    return SKILL_LOGGING;
         case LOCKTYPE_SKINNING:                       return SKILL_SKINNING;
+        case LOCKTYPE_LOCKPICKING:                    return SKILL_LOCKPICKING; // Classic 1.60: vanilla Lockpicking skill
         case LOCKTYPE_CLASSIC_HERBALISM:              return SKILL_CLASSIC_HERBALISM;
         case LOCKTYPE_OUTLAND_HERBALISM:              return SKILL_OUTLAND_HERBALISM;
         case LOCKTYPE_NORTHREND_HERBALISM:            return SKILL_NORTHREND_HERBALISM;

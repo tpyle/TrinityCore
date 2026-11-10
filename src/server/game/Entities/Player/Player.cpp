@@ -3233,7 +3233,9 @@ bool Player::AddSpell(uint32 spellId, bool active, bool learning, bool dependent
                 continue;
 
             // Runeforging special case
-            if ((_spell_idx->second->GetAcquireMethod() == SkillLineAbilityAcquireMethod::AutomaticCharLevel && !HasSkill(_spell_idx->second->SkillLine)) || ((_spell_idx->second->SkillLine == SKILL_RUNEFORGING) && _spell_idx->second->TrivialSkillLineRankHigh == 0))
+            // Classic 1.60: Pick Lock (trained, so not AutomaticCharLevel) starts the Lockpicking skill, as in vanilla
+            if ((_spell_idx->second->GetAcquireMethod() == SkillLineAbilityAcquireMethod::AutomaticCharLevel && !HasSkill(_spell_idx->second->SkillLine)) || ((_spell_idx->second->SkillLine == SKILL_RUNEFORGING) && _spell_idx->second->TrivialSkillLineRankHigh == 0)
+                || (_spell_idx->second->SkillLine == SKILL_LOCKPICKING && !HasSkill(SKILL_LOCKPICKING)))
                 if (SkillRaceClassInfoEntry const* rcInfo = sDB2Manager.GetSkillRaceClassInfo(_spell_idx->second->SkillLine, GetRace(), GetClass()))
                     LearnDefaultSkill(rcInfo);
         }
@@ -5807,6 +5809,7 @@ bool Player::UpdateGatherSkill(uint32 skillId, uint32 skillValue, uint32 redLeve
     switch (skillEntry->ParentSkillLineID ? skillEntry->ParentSkillLineID : skillEntry->ID)
     {
         case SKILL_HERBALISM:
+        case SKILL_LOCKPICKING: // Classic 1.60: vanilla (VMaNGOS) gains Lockpicking like Herbalism
             return UpdateSkillPro(skillId, SkillGainChance(skillValue, grayLevel, greenLevel, yellowLevel) * multiplicator, gatheringSkillGain);
         case SKILL_SKINNING:
             if (sWorld->getIntConfig(CONFIG_SKILL_CHANCE_SKINNING_STEPS) == 0)
