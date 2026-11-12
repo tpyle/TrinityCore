@@ -7,6 +7,8 @@
  * 10 hit rating = 1% hit, 14 crit rating = 1% crit, 10 haste rating = 1% haste, at every level). Level-ups
  * never reset these modifiers, so the bonuses last until changed. Works on offline characters too: their
  * row is changed and the bonus applies at their next login.
+ *
+ * spell_bonus_tome_stat: the stat Tomes (custom-sql 066 and 067, dropped by the core's BonusLoot) each add 1 to one stat.
  */
 
 #include "Chat.h"
@@ -14,6 +16,7 @@
 #include "DatabaseEnv.h"
 #include "Player.h"
 #include "ScriptMgr.h"
+#include "SpellScript.h"
 #include <array>
 #include <span>
 
@@ -60,6 +63,11 @@ constexpr BonusStat BONUS_STATS[] =
 };
 
 constexpr uint32 MAX_BONUS = 100000;
+
+// The stat Tomes' spells (custom-sql 066, tools/bonus_tomes.py): 8104002 + n adds 1 to BONUS_TOMES[n]
+constexpr uint32 FIRST_STAT_TOME_SPELL = 8104002;
+constexpr uint8 BONUS_TOMES[] = { 1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15, 16, 20, 21, 22, 23, 24 };
+static_assert(std::size(BONUS_TOMES) == std::size(BONUS_STATS));
 
 BonusStat const* FindStat(std::string_view name)
 {
@@ -110,6 +118,14 @@ uint32 GetBonus(ObjectGuid guid, BonusStat const& stat)
     if (QueryResult result = CharacterDatabase.PQuery("SELECT amount FROM character_bonus_stat WHERE guid = {} AND stat = {}", guid.GetCounter(), stat.Key))
         return (*result)[0].GetUInt32();
     return 0;
+}
+
+void StoreBonus(ObjectGuid guid, BonusStat const& stat, uint32 amount)
+{
+    if (amount)
+        CharacterDatabase.DirectPExecute("REPLACE INTO character_bonus_stat (guid, stat, amount) VALUES ({}, {}, {})", guid.GetCounter(), stat.Key, amount);
+    else
+        CharacterDatabase.DirectPExecute("DELETE FROM character_bonus_stat WHERE guid = {} AND stat = {}", guid.GetCounter(), stat.Key);
 }
 
 std::string ListStatNames()
@@ -168,10 +184,7 @@ bool SetBonus(ChatHandler* handler, PlayerIdentifier const& player, BonusStat co
     }
 
     uint32 oldAmount = GetBonus(player.GetGUID(), stat);
-    if (newAmount)
-        CharacterDatabase.DirectPExecute("REPLACE INTO character_bonus_stat (guid, stat, amount) VALUES ({}, {}, {})", player.GetGUID().GetCounter(), stat.Key, newAmount);
-    else
-        CharacterDatabase.DirectPExecute("DELETE FROM character_bonus_stat WHERE guid = {} AND stat = {}", player.GetGUID().GetCounter(), stat.Key);
+    StoreBonus(player.GetGUID(), stat, newAmount);
 
     if (Player* target = player.GetConnectedPlayer())
     {
@@ -282,8 +295,67 @@ public:
     }
 };
 
+// 8104002-8104018 - Tome of <stat>: +1 to the Tome's stat. Refused (and the Tome kept) at the cap of MAX_BONUS.
+class spell_bonus_tome_stat : public SpellScript
+{
+    BonusStat const* GetTomeStat() const
+    {
+        uint32 index = GetSpellInfo()->Id - FIRST_STAT_TOME_SPELL;
+        return index < std::size(BONUS_TOMES) ? FindStat(BONUS_TOMES[index]) : nullptr;
+    }
+
+    bool Load() override
+    {
+        return GetTomeStat() != nullptr;
+    }
+
+    SpellCastResult CheckCast()
+    {
+        Player* player = GetCaster()->ToPlayer();
+        if (!player)
+            return SPELL_FAILED_BAD_TARGETS;
+
+        BonusStat const* stat = GetTomeStat();
+        if (GetBonus(player->GetGUID(), *stat) >= MAX_BONUS)
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage("Your %s bonus is already at its limit of %u.", stat->Name, MAX_BONUS);
+            return SPELL_FAILED_DONT_REPORT;
+        }
+        return SPELL_CAST_OK;
+    }
+
+    void HandleDummy(SpellEffIndex /*effIndex*/)
+    {
+        Player* player = GetHitPlayer();
+        if (!player)
+            return;
+
+        BonusStat const* stat = GetTomeStat();
+        uint32 amount = GetBonus(player->GetGUID(), *stat) + 1;
+        StoreBonus(player->GetGUID(), *stat, amount);
+        ApplyBonus(player, *stat, 1, true);
+        ChatHandler(player->GetSession()).PSendSysMessage("You gain 1 %s (bonus now +%u).", stat->Name, amount);
+    }
+
+    // The bonus is written at once; save the character after the Tome is used up (Spell::TakeCastItem runs after the
+    // effects), so a crash cannot leave the bonus with the Tome still in the bags
+    void SaveCharacter()
+    {
+        if (Player* player = GetCaster()->ToPlayer())
+            player->SaveToDB();
+    }
+
+    void Register() override
+    {
+        OnCheckCast += SpellCheckCastFn(spell_bonus_tome_stat::CheckCast);
+        OnEffectHitTarget += SpellEffectFn(spell_bonus_tome_stat::HandleDummy, EFFECT_0, SPELL_EFFECT_DUMMY);
+        AfterCast += SpellCastFn(spell_bonus_tome_stat::SaveCharacter);
+    }
+};
+
 void AddSC_bonusstats_commandscript()
 {
     new bonusstats_commandscript();
     new bonusstats_playerscript();
+    RegisterSpellScript(spell_bonus_tome_stat);
 }

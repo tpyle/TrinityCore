@@ -6,6 +6,9 @@
  * custom SQL adds a source "1 point for quest N" for each of them, and raises the currency's cap. Granting
  * a point completes the next marker quest, which the client sees through the quest-completed bits. Completed
  * quests are saved with the character, so the points survive level-ups, relogs and talent resets.
+ *
+ * spell_bonus_tome_talent: the Tome of Talent (custom-sql 066 and 067, dropped by the core's BonusLoot) grants one point
+ * the same way.
  */
 
 #include "Chat.h"
@@ -13,6 +16,7 @@
 #include "MapUtils.h"
 #include "Player.h"
 #include "ScriptMgr.h"
+#include "SpellScript.h"
 #include "TraitMgr.h"
 #include "TraitPacketsCommon.h"
 #include "UpdateFields.h"
@@ -184,7 +188,59 @@ public:
     }
 };
 
+// 8104001 - Tome of Talent: one more granted talent point. Refused (and the Tome kept) once all of them are granted.
+class spell_bonus_tome_talent : public SpellScript
+{
+    SpellCastResult CheckCast()
+    {
+        Player* player = GetCaster()->ToPlayer();
+        if (!player)
+            return SPELL_FAILED_BAD_TARGETS;
+
+        if (GetGranted(player) >= MARKER_QUEST_COUNT)
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage("You already have all %u talent points a Tome can grant.", MARKER_QUEST_COUNT);
+            return SPELL_FAILED_DONT_REPORT;
+        }
+        return SPELL_CAST_OK;
+    }
+
+    void HandleDummy(SpellEffIndex /*effIndex*/)
+    {
+        Player* player = GetHitPlayer();
+        if (!player)
+            return;
+
+        for (uint32 i = 0; i < MARKER_QUEST_COUNT; ++i)
+        {
+            if (player->IsQuestRewarded(FIRST_MARKER_QUEST + i))
+                continue;
+
+            player->SetRewardedQuest(FIRST_MARKER_QUEST + i);
+            int32 owned, spent;
+            GetTalentPoints(player, owned, spent);
+            ChatHandler(player->GetSession()).PSendSysMessage("You gain a talent point. Talent points: %d total, %d unspent.", owned, owned - spent);
+            return;
+        }
+    }
+
+    // After the Tome is used up (Spell::TakeCastItem runs after the effects), so the point and the spent Tome are saved together
+    void SaveCharacter()
+    {
+        if (Player* player = GetCaster()->ToPlayer())
+            player->SaveToDB();
+    }
+
+    void Register() override
+    {
+        OnCheckCast += SpellCheckCastFn(spell_bonus_tome_talent::CheckCast);
+        OnEffectHitTarget += SpellEffectFn(spell_bonus_tome_talent::HandleDummy, EFFECT_0, SPELL_EFFECT_DUMMY);
+        AfterCast += SpellCastFn(spell_bonus_tome_talent::SaveCharacter);
+    }
+};
+
 void AddSC_talentgrant_commandscript()
 {
     new talentgrant_commandscript();
+    RegisterSpellScript(spell_bonus_tome_talent);
 }

@@ -98,6 +98,7 @@
 #include "VignettePackets.h"
 #include "World.h"
 #include "WorldScale.h"
+#include "BonusLoot.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include <atomic>
@@ -11884,6 +11885,9 @@ void Unit::SetMeleeAnimKitId(uint16 animKitId)
             if (InstanceScript const* instance = creature->GetInstanceScript())
                 dungeonEncounter = instance->GetBossDungeonEncounter(creature);
 
+            // Classic 1.60 bonus loot: Tomes, rolled once for the kill and added to one of the loots made below
+            std::vector<uint32> const bonusTomes = BonusLoot::Roll(creature, tappers, dungeonEncounter != nullptr);
+
             // vanilla: a grouped kill in a dungeon leaves one shared corpse under the group's loot method, bosses and trash alike;
             // trash kept in the round robin looter's personal loot hid the corpse from the master looter and the rest of the raid
             bool sharedCorpse = false;
@@ -11920,6 +11924,9 @@ void Unit::SetMeleeAnimKitId(uint16 animKitId)
                 if (creature->GetLootMode() > 0)
                     loot->generateMoneyLoot(creature->GetCreatureDifficulty()->GoldMin, creature->GetCreatureDifficulty()->GoldMax);
 
+                for (uint32 tome : bonusTomes)
+                    loot->AddBonusItem(tome, looter, !group);
+
                 if (group)
                     loot->NotifyLootList(creature->GetMap());
 
@@ -11937,6 +11944,25 @@ void Unit::SetMeleeAnimKitId(uint16 animKitId)
                     creature->m_personalLoot = GenerateDungeonEncounterPersonalLoot(dungeonEncounter->ID, creature->GetLootId(),
                         LootTemplates_Creature, LOOT_CORPSE, creature, creature->GetCreatureDifficulty()->GoldMin, creature->GetCreatureDifficulty()->GoldMax,
                         creature->GetLootMode(), creature->GetMap()->GetMapDifficulty(), tappers);
+
+                    // the Tomes go to one tapper not locked to the encounter, in a loot of their own if the table gave them none
+                    std::vector<Player*> tomeLooters;
+                    for (Player* tapper : tappers)
+                        if (!tapper->IsLockedToDungeonEncounter(dungeonEncounter->ID))
+                            tomeLooters.push_back(tapper);
+                    if (!bonusTomes.empty() && !tomeLooters.empty())
+                    {
+                        Player* tomeLooter = Trinity::Containers::SelectRandomContainerElement(tomeLooters);
+                        std::unique_ptr<Loot>& loot = creature->m_personalLoot[tomeLooter->GetGUID()];
+                        if (!loot)
+                        {
+                            loot.reset(new Loot(creature->GetMap(), creature->GetGUID(), LOOT_CORPSE, nullptr));
+                            loot->SetItemContext(ItemBonusMgr::GetContextForPlayer(creature->GetMap()->GetMapDifficulty(), tomeLooter));
+                            loot->SetDungeonEncounterId(dungeonEncounter->ID);
+                        }
+                        for (uint32 tome : bonusTomes)
+                            loot->AddBonusItem(tome, tomeLooter, true);
+                    }
                 }
                 else if (!tappers.empty())
                 {
@@ -11954,6 +11980,9 @@ void Unit::SetMeleeAnimKitId(uint16 animKitId)
                     if (creature->GetLootMode() > 0)
                         loot->generateMoneyLoot(creature->GetCreatureDifficulty()->GoldMin, creature->GetCreatureDifficulty()->GoldMax);
 
+                    for (uint32 tome : bonusTomes)
+                        loot->AddBonusItem(tome, looter, false);
+
                     if (group)
                         loot->NotifyLootList(creature->GetMap());
 
@@ -11967,6 +11996,8 @@ void Unit::SetMeleeAnimKitId(uint16 animKitId)
             }
             else
             {
+                // the Tomes go to one tapper
+                Player* tomeLooter = !bonusTomes.empty() && !tappers.empty() ? Trinity::Containers::SelectRandomContainerElement(tappers) : nullptr;
                 for (Player* tapper : tappers)
                 {
                     Loot* loot = new Loot(creature->GetMap(), creature->GetGUID(), LOOT_CORPSE, nullptr);
@@ -11979,6 +12010,10 @@ void Unit::SetMeleeAnimKitId(uint16 animKitId)
 
                     if (creature->GetLootMode() > 0)
                         loot->generateMoneyLoot(creature->GetCreatureDifficulty()->GoldMin, creature->GetCreatureDifficulty()->GoldMax);
+
+                    if (tapper == tomeLooter)
+                        for (uint32 tome : bonusTomes)
+                            loot->AddBonusItem(tome, tapper, true);
 
                     creature->m_personalLoot[tapper->GetGUID()].reset(loot);
                 }

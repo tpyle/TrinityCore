@@ -339,6 +339,10 @@ struct TC_GAME_API Loot
     // Inserts the item into the loot (called by LootTemplate processors)
     void AddItem(LootStoreItem const& item);
 
+    // Classic 1.60 bonus loot (BonusLoot.h): one item added after FillLoot (or without it), with the access rights FillLoot gives
+    // its own items: lootOwner's group under its loot rules unless personal, else lootOwner alone
+    void AddBonusItem(uint32 itemId, Player* lootOwner, bool personal);
+
     bool AutoStore(Player* player, uint8 bag, uint8 slot, bool broadcast = false, bool pushed = false, bool createdByPlayer = false);
     void AutoStoreTrackingQuests(Player* player, NotNormalLootItemList& ffaItems);
 

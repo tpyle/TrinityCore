@@ -1271,6 +1271,56 @@ void Loot::Update()
     }
 }
 
+void Loot::AddBonusItem(uint32 itemId, Player* lootOwner, bool personal)
+{
+    size_t const index = items.size();
+    AddItem(LootStoreItem(itemId, LootStoreItem::Type::Item, 100.0f, false, LOOT_MODE_DEFAULT, 0, 1, 1));
+    if (items.size() == index)
+        return;
+
+    LootItem& item = items.back();
+    std::vector<Player*> looters;
+    Group const* group = personal ? nullptr : lootOwner->GetGroup();
+    if (group)
+    {
+        if (loot_type == LOOT_CORPSE && roundRobinPlayer.IsEmpty())
+            roundRobinPlayer = lootOwner->GetGUID();
+
+        for (GroupReference const& itr : group->GetMembers())
+            if (itr.GetSource()->IsAtGroupRewardDistance(lootOwner))
+                looters.push_back(itr.GetSource());
+    }
+    else
+        looters.push_back(lootOwner);
+
+    // as FillNotNormalLootFor does for one item
+    for (Player* looter : looters)
+    {
+        _allowedLooters.insert(looter->GetGUID());
+        if (!item.AllowedForPlayer(looter, this))
+            continue;
+
+        item.AddAllowedLooter(looter);
+        if (!item.is_counted)
+        {
+            item.is_counted = true;
+            ++unlootedCount;
+        }
+    }
+
+    // as FillLoot does for group loot
+    if (group && item.follow_loot_rules && !item.freeforall)
+    {
+        if (ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId))
+        {
+            if (proto->GetQuality() < uint32(group->GetLootThreshold()))
+                item.is_underthreshold = true;
+            else if (_lootMethod == MASTER_LOOT || _lootMethod == GROUP_LOOT || _lootMethod == NEED_BEFORE_GREED)
+                item.is_blocked = true;
+        }
+    }
+}
+
 void Loot::FillNotNormalLootFor(Player* player)
 {
     ObjectGuid plguid = player->GetGUID();
