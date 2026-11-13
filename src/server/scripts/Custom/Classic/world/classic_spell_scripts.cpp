@@ -146,6 +146,28 @@ class classic_spell_ground_area_damage : public AuraScript
     }
 };
 
+// 6785, 6787, 9866, 9867 - Ravage; 9005, 9823, 9827 - Pounce
+// Blizzard hotfix 6 November 2026: "Night Elf: Shadowmelded Druids no longer have access to Ravage and Pounce." Shadowmeld (20580)
+// is a stealth aura, so a druid in Cat Form could open with them from it instead of from Prowl. Live now lists Shadowmeld as an
+// aura the caster must not have (SpellAuraRestrictions.ExcludeCasterAuraSpell 20580, seen in the live spell data of wowsims/forever,
+// MIT); our client data does not have that yet, so the server checks it.
+class classic_spell_dru_not_from_shadowmeld : public SpellScript
+{
+    static constexpr uint32 SPELL_SHADOWMELD = 20580;
+
+    SpellCastResult CheckCast()
+    {
+        if (GetCaster()->HasAura(SPELL_SHADOWMELD))
+            return SPELL_FAILED_CASTER_AURASTATE;
+        return SPELL_CAST_OK;
+    }
+
+    void Register() override
+    {
+        OnCheckCast += SpellCheckCastFn(classic_spell_dru_not_from_shadowmeld::CheckCast);
+    }
+};
+
 // Classic 1.60 (WoW Forever), Shen'dar Highlands cave, quest 94489 (official beta sniff 70205): clicking an injured druid makes the
 // player cast 1276047 (dummy) on it. Credit "Injured Druids healed" (257964) and the druid's own hidden objective (its entry).
 enum ClassicHealInjuredDruid
@@ -2141,9 +2163,157 @@ class classic_spell_shadow_storm_min_range : public SpellScript
     }
 };
 
+// 1258773 - Testing the Wells (Forever quest 92742, Westfall): the Well Testing Kit 254545 casts a dummy on a "nearby entry" target that
+// nothing in the data names, so every use failed with an invalid target and the two water samples could never be had (Discord
+// 2026-11-09). The target is the caster now (SpellMgr::LoadSpellInfoCorrections); next to a well the kit gives that well's sample.
+// Wells: the players' map spots 56.5,18.8 (Furlbrow's Pumpkin Farm) and 46.0,38.3 (the Molsen Farm), turned into world spots with
+// Gryan Stoutmantle and Salma Saldean as fit points; the 25 yd radius covers the guess.
+class classic_spell_quest_testing_the_wells : public SpellScript
+{
+    struct Well { float x, y; uint32 sample; };
+    static constexpr Well WELLS[] =
+    {
+        { -9839.2f, 1038.2f, 254546 },
+        { -10294.1f, 1405.4f, 254547 },
+    };
+    static constexpr float WELL_RADIUS = 25.0f;
+
+    Well const* NearestWell() const
+    {
+        Unit* caster = GetCaster();
+        if (caster->GetMapId() != 0)
+            return nullptr;
+        for (Well const& well : WELLS)
+            if (caster->GetExactDist2d(well.x, well.y) <= WELL_RADIUS)
+                return &well;
+        return nullptr;
+    }
+
+    SpellCastResult CheckWell()
+    {
+        return NearestWell() ? SPELL_CAST_OK : SPELL_FAILED_NOT_HERE;
+    }
+
+    void HandleDummy(SpellEffIndex /*effIndex*/)
+    {
+        Player* player = GetCaster()->ToPlayer();
+        Well const* well = NearestWell();
+        if (!player || !well)
+            return;
+        if (player->GetItemCount(well->sample) == 0)
+            player->AddItem(well->sample, 1);
+    }
+
+    void Register() override
+    {
+        OnCheckCast += SpellCheckCastFn(classic_spell_quest_testing_the_wells::CheckWell);
+        OnEffectHitTarget += SpellEffectFn(classic_spell_quest_testing_the_wells::HandleDummy, EFFECT_0, SPELL_EFFECT_DUMMY);
+    }
+};
+
+// Shaman weapon imbues of 1.60: one DUMMY aura per imbue, the enchant on the weapon tells the rank.
+static Item* ClassicImbuedWeapon(AuraEffect const* aurEff, ProcEventInfo& eventInfo)
+{
+    Player* player = aurEff->GetBase()->GetUnitOwner()->ToPlayer();
+    DamageInfo* damage = eventInfo.GetDamageInfo();
+    if (!player || !damage || !eventInfo.GetActionTarget())
+        return nullptr;
+    WeaponAttackType const attack = damage->GetAttackType();
+    if (attack != BASE_ATTACK && attack != OFF_ATTACK)
+        return nullptr;
+    Item* weapon = player->GetWeaponForAttack(attack, true);
+    if (!weapon || weapon->GetGUID() != aurEff->GetBase()->GetCastItemGUID())
+        return nullptr;
+    return weapon;
+}
+
+// 439431 - Windfury Weapon
+class classic_spell_sha_windfury_weapon : public AuraScript
+{
+    // enchant -> the rank's attack power + extra attacks spell
+    static uint32 GetRankSpell(uint32 enchantId)
+    {
+        switch (enchantId)
+        {
+            case 283:  return 8233;
+            case 284:  return 8236;
+            case 525:  return 10484;
+            case 1669:
+            case 7569: return 16361;
+            case 8293: return 8233;
+            default:   return 0;
+        }
+    }
+
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        return ValidateSpellInfo({ 8233, 8236, 10484, 16361 });
+    }
+
+    bool CheckProc(AuraEffect const* aurEff, ProcEventInfo& eventInfo)
+    {
+        Item* weapon = ClassicImbuedWeapon(aurEff, eventInfo);
+        if (!weapon)
+            return false;
+        uint32 const rank = GetRankSpell(weapon->GetEnchantmentId(TEMP_ENCHANTMENT_SLOT));
+        // the attacks it granted do not grant more
+        return rank && GetTarget()->GetLastExtraAttackSpell() != rank;
+    }
+
+    void HandleProc(AuraEffect const* aurEff, ProcEventInfo& eventInfo)
+    {
+        PreventDefaultAction();
+        if (Item* weapon = ClassicImbuedWeapon(aurEff, eventInfo))
+            if (uint32 rank = GetRankSpell(weapon->GetEnchantmentId(TEMP_ENCHANTMENT_SLOT)))
+                GetTarget()->CastSpell(GetTarget(), rank, CastSpellExtraArgs(aurEff).SetCastItem(weapon));
+    }
+
+    void Register() override
+    {
+        DoCheckEffectProc += AuraCheckEffectProcFn(classic_spell_sha_windfury_weapon::CheckProc, EFFECT_0, SPELL_AURA_DUMMY);
+        OnEffectProc += AuraEffectProcFn(classic_spell_sha_windfury_weapon::HandleProc, EFFECT_0, SPELL_AURA_DUMMY);
+    }
+};
+
+// Talents of 1.60 whose proc chance is an effect value scaled by the talent rank, not SpellAuraOptions.ProcChance (100).
+class classic_spell_proc_chance_from_effect : public AuraScript
+{
+protected:
+    static SpellEffIndex ChanceEffect(uint32 spellId)
+    {
+        switch (spellId)
+        {
+            case 11180:   // Winter's Chill: $m2
+            case 12298:   // Shield Specialization (warrior): $m2
+            case 14909:   // Searing Light: $m2
+            case 16850:   // Improved Starfire: $s2
+            case 20150:   // Shield Specialization (paladin): $m2
+            case 1224716: // Puncturing Wounds: $m2
+                return EFFECT_1;
+            default:
+                return EFFECT_0;
+        }
+    }
+
+    bool CheckProc(ProcEventInfo& /*eventInfo*/)
+    {
+        AuraEffect const* chance = GetEffect(ChanceEffect(GetId()));
+        return chance && roll_chance(chance->GetAmount());
+    }
+
+    void Register() override
+    {
+        DoCheckProc += AuraCheckProcFn(classic_spell_proc_chance_from_effect::CheckProc);
+    }
+};
+
+
 void AddSC_classic_spell_scripts()
 {
+    RegisterSpellScript(classic_spell_sha_windfury_weapon);
+    RegisterSpellScript(classic_spell_proc_chance_from_effect);
     RegisterSpellScript(classic_spell_warr_gore_drinker);
+    RegisterSpellScript(classic_spell_dru_not_from_shadowmeld);
     RegisterSpellScript(classic_spell_warr_gore_drinker_enrage);
     RegisterSpellScript(classic_spell_undead_touch_of_the_grave);
     RegisterSpellScript(classic_spell_tauren_cultivation);
@@ -2194,4 +2364,5 @@ void AddSC_classic_spell_scripts()
     RegisterSpellScript(classic_spell_mage_decipher);
     new classic_player_scroll_deciphering();
     RegisterSpellScript(classic_spell_shadow_storm_min_range);
+    RegisterSpellScript(classic_spell_quest_testing_the_wells);
 }

@@ -660,6 +660,17 @@ PetDefaultSpellsEntry const* SpellMgr::GetPetDefaultSpellsEntry(int32 id) const
     return nullptr;
 }
 
+uint32 SpellMgr::GetPetTeachSpell(uint32 petSpellId) const
+{
+    auto itr = mPetTeachSpells.find(petSpellId);
+    return itr != mPetTeachSpells.end() ? itr->second : 0;
+}
+
+bool SpellMgr::IsPetAbility(uint32 spellId) const
+{
+    return mPetAbilitySpells.contains(spellId);
+}
+
 SpellAreaMapBounds SpellMgr::GetSpellAreaMapBounds(uint32 spell_id) const
 {
     return mSpellAreaMap.equal_range(spell_id);
@@ -2294,6 +2305,48 @@ void SpellMgr::LoadPetDefaultSpells()
     TC_LOG_INFO("server.loading", ">> Loaded {} summonable creature templates in {} ms", countCreature, GetMSTimeDiffToNow(oldMSTime));
 }
 
+void SpellMgr::LoadPetTeachSpells()
+{
+    uint32 oldMSTime = getMSTime();
+
+    mPetTeachSpells.clear();
+    mPetAbilitySpells.clear();
+
+    // every ability a pet family can learn: its family skill line and the general pet line
+    std::unordered_set<uint16> petSkillLines;
+    for (CreatureFamilyEntry const* family : sCreatureFamilyStore)
+        for (int16 skillLine : family->SkillLine)
+            if (skillLine)
+                petSkillLines.insert(uint16(skillLine));
+
+    for (uint16 skillLine : petSkillLines)
+        if (std::vector<SkillLineAbilityEntry const*> const* abilities = sDB2Manager.GetSkillLineAbilitiesBySkill(skillLine))
+            for (SkillLineAbilityEntry const* ability : *abilities)
+                mPetAbilitySpells.insert(uint32(ability->Spell));
+
+    // Classic 1.60: the hidden spells that teach a pet an ability (warlock grimoires and the hunter's pet
+    // training spells sold by pet trainers) learn their trigger spell on the pet.
+    for (SpellInfo const& spellInfo : mSpellInfoMap)
+    {
+        if (spellInfo.Difficulty != DIFFICULTY_NONE)
+            continue;
+
+        for (SpellEffectInfo const& effect : spellInfo.GetEffects())
+        {
+            if (effect.Effect != SPELL_EFFECT_LEARN_SPELL && effect.Effect != SPELL_EFFECT_LEARN_PET_SPELL)
+                continue;
+
+            if (!effect.TriggerSpell || !mPetAbilitySpells.contains(effect.TriggerSpell))
+                continue;
+
+            mPetTeachSpells.try_emplace(effect.TriggerSpell, spellInfo.Id);
+        }
+    }
+
+    TC_LOG_INFO("server.loading", ">> Loaded {} pet abilities and {} pet teach spells in {} ms",
+        uint32(mPetAbilitySpells.size()), uint32(mPetTeachSpells.size()), GetMSTimeDiffToNow(oldMSTime));
+}
+
 void SpellMgr::LoadSpellAreas()
 {
     uint32 oldMSTime = getMSTime();
@@ -3790,6 +3843,24 @@ void SpellMgr::LoadSpellInfoCorrections()
         spellInfo->AttributesEx |= SPELL_ATTR1_NO_THREAT;
     });
 
+    // Forever quest Testing the Wells: the Well Testing Kit's dummy (1258773) aims at a "nearby entry" that no data names; it hits the
+    // caster, and classic_spell_quest_testing_the_wells gives the sample next to a well
+    ApplySpellFix({ 1258773 }, [](SpellInfo* spellInfo)
+    {
+        ApplySpellEffectFix(spellInfo, EFFECT_0, [](SpellEffectInfo* spellEffectInfo)
+        {
+            spellEffectInfo->TargetA = SpellImplicitTargetInfo(TARGET_UNIT_CASTER);
+            spellEffectInfo->TargetB = SpellImplicitTargetInfo();
+        });
+    });
+
+    // Forever Skyborne racial Skysight: its buff (Elemental Blessing 1259688) also raises mounted speed, so it can be cast while
+    // mounted (client row through hotfixes 2026_11_09_40)
+    ApplySpellFix({ 1259686 }, [](SpellInfo* spellInfo)
+    {
+        spellInfo->Attributes |= SPELL_ATTR0_ALLOW_WHILE_MOUNTED;
+    });
+
     // Classic 1.60 warrior Deep Wounds: the bleed tick (412613) never misses, never crits and ignores armor
     ApplySpellFix({ 412613 }, [](SpellInfo* spellInfo)
     {
@@ -3914,6 +3985,13 @@ void SpellMgr::LoadSpellInfoCorrections()
     }, [](SpellInfo* spellInfo)
     {
         spellInfo->RangeEntry = sSpellRangeStore.LookupEntry(6); // 100 yards
+    });
+
+    // Devastate, the damage part of the Rune of Devastate (Sunder Armor triggers it through 403195)
+    // Classic 1.60: the client gives it 50000 yards, melee like Sunder Armor
+    ApplySpellFix({ 403196 }, [](SpellInfo* spellInfo)
+    {
+        spellInfo->RangeEntry = sSpellRangeStore.LookupEntry(2); // combat range
     });
 
     // They Must Burn Bomb Aura (self)

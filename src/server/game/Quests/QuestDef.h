@@ -40,7 +40,8 @@ namespace WorldPackets::Quest
     struct QuestRewards;
 }
 
-#define MAX_QUEST_LOG_SIZE 40                               // Classic 1.60: the Forever client allows 40 (retail 35)
+// Quest log slots the server keeps. How many a player may fill is Quests.LogSize (default 35, at most this), see Player::AddQuest.
+#define MAX_QUEST_LOG_SIZE 40
 
 #define QUEST_ITEM_DROP_COUNT 4
 #define QUEST_REWARD_CHOICES_COUNT 6

@@ -610,8 +610,8 @@ void CollectionMgr::SaveAccountItemAppearances(LoginDatabaseTransaction trans)
 
 void CollectionMgr::AddItemAppearance(Item* item)
 {
-    // Classic 1.60: most white and grey gear has no binding at all, so it never became soulbound and was never collected,
-    // even when worn. Collect unbound items when obtained, like bind-on-pickup ones.
+    // An item that never binds (most vendor and white gear in Classic) can not wait for a bind like a bind on equip item does:
+    // it would never be collected. It counts as soon as the player has it (looted, bought, equipped or in the bags at login).
     if (!item->IsSoulBound() && item->GetBonding() != BIND_NONE)
         return;
 
