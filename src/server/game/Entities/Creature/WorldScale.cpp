@@ -33,6 +33,7 @@ namespace WorldScale
         config.AffectWorldBosses = sConfigMgr->GetBoolDefault("WorldScale.AffectWorldBosses", false);
         config.MinMultiplier     = sConfigMgr->GetFloatDefault("WorldScale.MinMultiplier", 0.05f);
         config.MaxMultiplier     = sConfigMgr->GetFloatDefault("WorldScale.MaxMultiplier", 20.0f);
+        config.LevelsBelow       = std::min<uint32>(sConfigMgr->GetIntDefault("WorldScale.LevelsBelow", 0), 10);
         config.KillXPFraction    = std::clamp(sConfigMgr->GetFloatDefault("WorldScale.KillXPFraction", 0.5f), 0.0f, 1.0f);
         config.AggroLevelsBelow  = sConfigMgr->GetIntDefault("WorldScale.Aggro.LevelsBelow", 5);
         config.Quests            = sConfigMgr->GetBoolDefault("WorldScale.Quests", true);
@@ -44,9 +45,9 @@ namespace WorldScale
         if (config.MaxMultiplier < config.MinMultiplier)
             config.MaxMultiplier = config.MinMultiplier;
 
-        TC_LOG_INFO("server.loading", "World scaling: {} (dungeons {}, raids {}, elites {}, bosses {}, kill xp {}, aggro -{}, quests {} xp {}, group xp split {})",
+        TC_LOG_INFO("server.loading", "World scaling: {} (dungeons {}, raids {}, elites {}, bosses {}, levels below {}, kill xp {}, aggro -{}, quests {} xp {}, group xp split {})",
             config.Enable ? "enabled" : "disabled", config.Dungeons, config.Raids, config.AffectElites, config.AffectWorldBosses,
-            config.KillXPFraction, config.AggroLevelsBelow, config.Quests, config.QuestXPFraction, config.GroupXPSplit);
+            config.LevelsBelow, config.KillXPFraction, config.AggroLevelsBelow, config.Quests, config.QuestXPFraction, config.GroupXPSplit);
     }
 
     bool CanScale(Creature const* creature, uint8 level)

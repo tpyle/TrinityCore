@@ -1645,7 +1645,7 @@ void Creature::SelectLevel()
     ApplyLevelScaling();
     // Classic 1.60: a world scaled creature keeps its own vanilla level (the bottom of its range); retail creatures are
     // the top of theirs and scale down
-    int32 levelWithDelta = m_worldScaled ? int32(m_unitData->ScalingLevelMin) : m_unitData->ScalingLevelMax + m_unitData->ScalingLevelDelta;
+    int32 levelWithDelta = m_worldScaled ? m_unitData->ScalingLevelMin + m_unitData->ScalingLevelDelta : m_unitData->ScalingLevelMax + m_unitData->ScalingLevelDelta;
     uint8 level = RoundToInterval<int32>(levelWithDelta, 1, STRONG_MAX_LEVEL);
     SetLevel(level);
 
@@ -2299,9 +2299,10 @@ float Creature::GetAttackDistance(Unit const* player) const
         aggroRadius += float(creatureLevel - playerLevel);
 
     // Classic 1.60: world scaling - a creature scaled up to the player's level aggroes as if it were some levels below them
-    // (WorldScale.Aggro.LevelsBelow, 1 yard per level), not from the 15 yards of an equal level one
+    // (WorldScale.Aggro.LevelsBelow, 1 yard per level), not from the 15 yards of an equal level one. The levels it already
+    // fights below the player (WorldScale.LevelsBelow) are in creatureLevel - playerLevel above.
     if (m_worldScaled && creatureLevel > int32(GetLevel()))
-        aggroRadius -= float(WorldScale::GetConfig().AggroLevelsBelow);
+        aggroRadius -= float(std::max<int32>(0, int32(WorldScale::GetConfig().AggroLevelsBelow) - (playerLevel - creatureLevel)));
 
     // Make sure that we wont go over the total range limits
     if (aggroRadius > maxRadius)
@@ -3279,17 +3280,20 @@ void Creature::ApplyLevelScaling()
         uint8 level = uint8(urand(classicLevel->first, classicLevel->second));
 
         // World scaling (WorldScale.h): the ContentTuning row "this level to 60", so the client shows each player the
-        // creature at their own level and GetLevelForTarget scales it for them; the creature itself stays at this level
+        // creature at their own level and GetLevelForTarget scales it for them; the creature itself stays at this level.
+        // WorldScale.LevelsBelow = N: the row "this level + N to 60" with a level delta of -N, so it shows and fights as N
+        // below the player, and as its own level until the player is N above it (the client does the same sum)
         m_worldScaled = false;
         m_worldScaleDamageCarry = 0.0f;
         if (WorldScale::CanScale(this, level))
         {
-            int32 const contentTuningId = WorldScale::ContentTuningBase + level;
+            int32 const below = std::min<int32>(WorldScale::GetConfig().LevelsBelow, 59 - level);
+            int32 const contentTuningId = WorldScale::ContentTuningBase + level + below;
             Optional<ContentTuningLevels> const levels = sDB2Manager.GetContentTuningData(contentTuningId, {});
-            if (levels && levels->MinLevel == level && levels->MaxLevel > level)
+            if (levels && levels->MinLevel == level + below && levels->MaxLevel > level + below)
             {
                 m_worldScaled = true;
-                ApplyLevelScaling(contentTuningId, 0);
+                ApplyLevelScaling(contentTuningId, -below);
                 return;
             }
         }

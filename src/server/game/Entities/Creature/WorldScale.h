@@ -32,6 +32,8 @@ namespace WorldScale
         bool AffectWorldBosses = false; // creatures flagged as boss mobs (world and dungeon bosses)
         float MinMultiplier = 0.05f;
         float MaxMultiplier = 20.0f;
+        // a scaled creature fights and shows as this many levels below the player (never below its own level); 0: the player's level
+        uint32 LevelsBelow = 0;
         float KillXPFraction = 0.5f;    // how far from the creature's at-its-own-level kill experience towards the player's to pay
         uint32 AggroLevelsBelow = 5;    // a scaled-up creature aggroes as if this many levels below the player
         bool Quests = true;             // quest experience below the player's level (custom-sql 057 makes the client show the level)
