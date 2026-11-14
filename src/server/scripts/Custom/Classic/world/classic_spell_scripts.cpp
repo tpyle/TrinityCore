@@ -17,6 +17,7 @@
 
 // Classic 1.60 class spell scripts.
 
+#include "ClassStance.h"
 #include "ScriptMgr.h"
 #include "AreaTrigger.h"
 #include "CellImpl.h"
@@ -786,7 +787,8 @@ namespace ClassicScrollDeciphering
         if (player->HasSkill(SKILL_SCROLL_DECIPHERING) || !player->HasSpell(SPELL_DECIPHER))
             return;
 
-        if (SkillRaceClassInfoEntry const* rcInfo = sDB2Manager.GetSkillRaceClassInfo(SKILL_SCROLL_DECIPHERING, player->GetRace(), player->GetClass()))
+        // the real class's or a learned class stance's (ClassStance.h): a warrior with Mage Stance deciphers too
+        if (SkillRaceClassInfoEntry const* rcInfo = ClassStance::GetSkillRaceClassInfo(player, SKILL_SCROLL_DECIPHERING, player->GetRace()))
             player->LearnDefaultSkill(rcInfo);
     }
 
