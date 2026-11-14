@@ -3274,8 +3274,12 @@ bool Creature::HasScalableLevels() const
 
 void Creature::ApplyLevelScaling()
 {
-    // Classic 1.60.1.70009: vanilla creatures have a fixed level range instead of ContentTuning scaling
-    if (std::pair<uint8, uint8> const* classicLevel = sObjectMgr->GetCreatureClassicLevel(GetEntry()))
+    // Classic 1.60.1.70009: vanilla creatures have a fixed level range instead of ContentTuning scaling; a spawn that Forever placed
+    // elsewhere at another level has its own range
+    std::pair<uint8, uint8> const* classicLevel = sObjectMgr->GetCreatureClassicSpawnLevel(GetSpawnId());
+    if (!classicLevel)
+        classicLevel = sObjectMgr->GetCreatureClassicLevel(GetEntry());
+    if (classicLevel)
     {
         uint8 level = uint8(urand(classicLevel->first, classicLevel->second));
 
