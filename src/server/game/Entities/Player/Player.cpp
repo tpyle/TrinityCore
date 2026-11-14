@@ -15017,7 +15017,7 @@ void Player::PrepareGossipMenu(WorldObject* source, uint32 menuId, bool showQues
                     break;
                 case GossipOptionNpc::Stablemaster:
                 case GossipOptionNpc::PetSpecializationMaster:
-                    if (GetClass() != CLASS_HUNTER)
+                    if (!ClassStance::KnowsClass(this, CLASS_HUNTER))     // or Hunter Stance (ClassStance.h)
                         canTalk = false;
                     break;
                 case GossipOptionNpc::DisableXPGain:
@@ -15092,7 +15092,7 @@ void Player::PrepareGossipMenu(WorldObject* source, uint32 menuId, bool showQues
         if (Pet::IsPetUntrainGossipOption(gossipMenuItem.GossipOptionID))
         {
             Pet* pet = GetPet();
-            if (GetClass() != CLASS_HUNTER || !pet || pet->getPetType() != HUNTER_PET || !pet->IsAlive())
+            if (!ClassStance::KnowsClass(this, CLASS_HUNTER) || !pet || pet->getPetType() != HUNTER_PET || !pet->IsAlive())
                 canTalk = false;
         }
 
@@ -16862,7 +16862,8 @@ bool Player::SatisfyQuestClass(Quest const* qInfo, bool msg) const
     if (reqClass == 0)
         return true;
 
-    if ((reqClass & GetClassMask()) == 0)
+    // the real class or a learned class stance's (ClassStance.h): a warrior with Hunter Stance takes the hunter's pet quests
+    if ((reqClass & GetKnownClassMask()) == 0)
     {
         if (msg)
         {
@@ -26661,9 +26662,12 @@ uint32 Player::GetKnownClassesBaseMana(uint8 level) const
 
 void Player::LearnClassStanceSkillSpells()
 {
+    // the skills the player has: mSkillStatus also keeps lines at 0 (other races' languages, Plate Mail before it is learned),
+    // and teaching their abilities gave a human Darnassian, Gnomish... without the skills, after which the client counted no
+    // language at all and refused every chat line (2026-11-14)
     std::vector<std::pair<uint32, uint32>> skills;          // LearnSkillRewardedSpells may add skills
     for (auto const& [skillId, skillStatus] : mSkillStatus)
-        if (skillStatus.uState != SKILL_DELETED)
+        if (skillStatus.uState != SKILL_DELETED && GetSkillRankByPos(skillStatus.pos))
             skills.emplace_back(skillId, GetSkillRankByPos(skillStatus.pos));
     for (auto const& [skillId, skillValue] : skills)
         LearnSkillRewardedSpells(skillId, skillValue, Races(GetRace()));

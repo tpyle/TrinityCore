@@ -26,6 +26,8 @@ namespace ClassStance
         bool enabled = true;
         constexpr int32 ClassicTalentCurrency = 3820;   // the Classic talent points (TraitMgr)
         bool talentsAlwaysActive = true;
+        bool allowInCombat = false;
+        bool sharedTalentPoints = false;
 
         bool IsStanceSkillCategory(uint32 skill)
         {
@@ -50,7 +52,11 @@ namespace ClassStance
     {
         enabled = sConfigMgr->GetBoolDefault("ClassStance.Enable", true);
         talentsAlwaysActive = sConfigMgr->GetBoolDefault("ClassStance.TalentsAlwaysActive", true);
-        TC_LOG_INFO("server.loading", "Class stances: {} (spells {}-{})", enabled ? "enabled" : "disabled", FirstSpell, LastSpell);
+        allowInCombat = sConfigMgr->GetBoolDefault("ClassStance.AllowInCombat", false);
+        sharedTalentPoints = sConfigMgr->GetBoolDefault("ClassStance.SharedTalentPoints", false);
+        TC_LOG_INFO("server.loading", "Class stances: {} (spells {}-{}), talents {}, {} talent points, {}", enabled ? "enabled" : "disabled",
+            FirstSpell, LastSpell, talentsAlwaysActive ? "always active" : "active in their stance", sharedTalentPoints ? "shared" : "separate",
+            allowInCombat ? "changed in combat too" : "changed out of combat only");
     }
 
     uint8 GetClassForSpell(uint32 spellId)
@@ -78,6 +84,11 @@ namespace ClassStance
             if (Classes[i] != player->GetClass() && player->HasSpell(FirstSpell + i))
                 mask |= 1u << (Classes[i] - 1);
         return mask;
+    }
+
+    bool KnowsClass(Player const* player, uint8 classId)
+    {
+        return player->GetClass() == classId || (GetLearnedClassMask(player) & (1u << (classId - 1)));
     }
 
     SkillRaceClassInfoEntry const* GetSkillRaceClassInfo(Player const* player, uint32 skill, uint8 race, bool anyStance)
@@ -292,24 +303,82 @@ namespace ClassStance
         return talentsAlwaysActive;
     }
 
-    uint32 GetTalentPoints(Player const* player, uint8 /*classId*/)
+    namespace
     {
-        // as many as the real class owns: its talent currency counts the levels, the Talented perk, Rate.Talent and the points
-        // granted by .talents grant and the Tome of Talent (cs_talentgrant.cpp)
-        if (UF::TraitConfig const* config = player->GetTraitConfig(player->m_activePlayerData->ActiveCombatTraitConfigID))
+        // the real class's talent points (its talent currency: levels, the Talented perk, Rate.Talent, granted points and Tomes)
+        // and what its talent window has spent
+        void GetRealTalentPoints(Player const* player, uint32& owned, uint32& spent)
         {
-            WorldPackets::Traits::TraitConfig traitConfig(*config);
-            std::map<int32, int32> owned;
-            TraitMgr::FillOwnedCurrenciesMap(traitConfig, player, owned);
-            auto itr = owned.find(ClassicTalentCurrency);
-            return itr != owned.end() ? uint32(std::max(itr->second, 0)) : 0;
-        }
+            owned = spent = 0;
+            if (UF::TraitConfig const* config = player->GetTraitConfig(player->m_activePlayerData->ActiveCombatTraitConfigID))
+            {
+                WorldPackets::Traits::TraitConfig traitConfig(*config);
+                std::map<int32, int32> ownedCurrencies;
+                TraitMgr::FillOwnedCurrenciesMap(traitConfig, player, ownedCurrencies);
+                if (auto itr = ownedCurrencies.find(ClassicTalentCurrency); itr != ownedCurrencies.end())
+                    owned = uint32(std::max(itr->second, 0));
+                std::map<int32, TraitMgr::SpentCurrency> spentCurrencies;
+                TraitMgr::FillSpentCurrenciesMap(traitConfig.Entries, spentCurrencies);
+                if (auto itr = spentCurrencies.find(ClassicTalentCurrency); itr != spentCurrencies.end())
+                    spent = uint32(std::max(itr->second.Total, 0));
+                return;
+            }
 
-        // no talent configuration yet: the points from levels
-        if (player->GetLevel() < 10)
-            return 0;
-        float const rate = sConfigMgr->GetFloatDefault("Rate.Talent", 1.0f);
-        return uint32(std::min<uint32>(player->GetLevel() - 9, 51) * rate);
+            // no talent configuration yet: the points from levels
+            if (player->GetLevel() >= 10)
+                owned = uint32(std::min<uint32>(player->GetLevel() - 9, 51) * sConfigMgr->GetFloatDefault("Rate.Talent", 1.0f));
+        }
+    }
+
+    bool AllowInCombat()
+    {
+        return allowInCombat;
+    }
+
+    bool SharedTalentPoints()
+    {
+        return sharedTalentPoints;
+    }
+
+    uint32 GetTalentPoints(Player const* player, uint8 classId)
+    {
+        // as many as the real class owns
+        uint32 owned, realSpent;
+        GetRealTalentPoints(player, owned, realSpent);
+        if (!sharedTalentPoints)
+            return owned;
+
+        // shared: what the real class and the other stance classes have not spent (never below what this class has spent)
+        uint32 const own = GetSpentTalentPoints(player, classId);
+        uint32 const others = realSpent + GetAllStanceSpentTalentPoints(player) - own;
+        return std::max(owned > others ? owned - others : 0u, own);
+    }
+
+    uint32 GetAllStanceSpentTalentPoints(Player const* player)
+    {
+        uint32 spent = 0;
+        for (auto const& [talentId, rank] : player->GetClassStanceTalents())
+            if (TalentEntry const* talent = sTalentStore.LookupEntry(talentId))
+                if (GetTabClass(talent->TabID))
+                    spent += rank;
+        return spent;
+    }
+
+    std::string CheckRealTalentCommit(Player const* player, std::vector<int32> const& oldAndNewSpent)
+    {
+        if (!enabled || !sharedTalentPoints || oldAndNewSpent.size() != 2)
+            return "";
+        int32 const oldSpent = oldAndNewSpent[0], newSpent = oldAndNewSpent[1];
+        if (newSpent <= oldSpent)
+            return "";      // taking talents back is always allowed
+
+        uint32 owned, realSpent;
+        GetRealTalentPoints(player, owned, realSpent);
+        uint32 const stances = GetAllStanceSpentTalentPoints(player);
+        if (uint32(std::max(newSpent, 0)) + stances <= owned)
+            return "";
+        return fmt::format("Your talent points are shared with your class stances, which have spent {} of them: {} of {} are left for your own talents.",
+            stances, owned > stances ? owned - stances : 0, owned);
     }
 
     uint32 GetSpentTalentPoints(Player const* player, uint8 classId)

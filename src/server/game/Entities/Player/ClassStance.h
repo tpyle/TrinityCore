@@ -14,6 +14,7 @@
 #include "ObjectGuid.h"
 #include <iterator>
 #include <string>
+#include <vector>
 
 class Player;
 class SpellInfo;
@@ -37,6 +38,8 @@ namespace ClassStance
 
     // the class mask of every class whose stance the player knows (the real class not included)
     uint32 GetLearnedClassMask(Player const* player);
+    // the player is of this class or has learned its stance (taming, demons, stable masters, class quests)
+    bool KnowsClass(Player const* player, uint8 classId);
 
     // the SkillRaceClassInfo entry that lets the player hold a skill: the real class's (race and class), else that of a learned
     // stance's class. For a stance class a class, armor or weapon skill line ignores the race: a human may learn the shaman's
@@ -60,6 +63,17 @@ namespace ClassStance
     // spent by the Classic rules (5 points in the tree a tier, prerequisites). A talent is its rank 1 spell with the rank as a trait, as the real class's talents are. They are
     // active at all times, or with ClassStance.TalentsAlwaysActive = 0 only while their class's stance is.
     bool TalentsAlwaysActive();
+    // ClassStance.AllowInCombat: stances may be changed in combat (the addon's bars, keys and panel still change only out of
+    // combat: the client does not let an addon change them in combat)
+    bool AllowInCombat();
+    // ClassStance.SharedTalentPoints: one pool for the real class and every stance class instead of a full pool each. The
+    // client's own talent window cannot know what the stances spent: it shows those points as unspent, and the server refuses
+    // a commit that spends them (CheckRealTalentCommit).
+    bool SharedTalentPoints();
+    // what every stance class has spent
+    uint32 GetAllStanceSpentTalentPoints(Player const* player);
+    // a commit of the real class's talents (the client's window): "" when allowed, else why not (only with shared points)
+    std::string CheckRealTalentCommit(Player const* player, std::vector<int32> const& oldAndNewSpent);
     uint32 GetTalentPoints(Player const* player, uint8 classId);
     uint32 GetSpentTalentPoints(Player const* player, uint8 classId);
     // "" when learned, else why not

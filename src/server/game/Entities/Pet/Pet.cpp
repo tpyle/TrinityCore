@@ -15,6 +15,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "ClassStance.h"
 #include "Pet.h"
 #include "PetScaling.h"
 #include "CharmInfo.h"
@@ -1339,7 +1340,14 @@ bool Guardian::InitStatsForLevel(uint8 petlevel)
 
     //Determine pet type
     PetType petType = MAX_PET_TYPE;
-    if (IsPet() && GetOwner()->GetTypeId() == TYPEID_PLAYER)
+    if (IsPet() && GetOwner()->GetTypeId() == TYPEID_PLAYER && (ToPet()->getPetType() == HUNTER_PET || ToPet()->getPetType() == SUMMON_PET))
+    {
+        // the pet's own type, from how it was tamed or summoned: a warrior with Hunter Stance has a hunter pet (ClassStance.h)
+        petType = ToPet()->getPetType();
+        if (petType == HUNTER_PET)
+            m_unitTypeMask |= UNIT_MASK_HUNTER_PET;
+    }
+    else if (IsPet() && GetOwner()->GetTypeId() == TYPEID_PLAYER)
     {
         if (GetOwner()->GetClass() == CLASS_WARLOCK
             || GetOwner()->GetClass() == CLASS_SHAMAN        // Fire Elemental
@@ -2179,14 +2187,15 @@ bool Pet::IsPermanentPetFor(Player* owner) const
     switch (getPetType())
     {
         case SUMMON_PET:
-            switch (owner->GetClass())
+            // the real class or a learned class stance's (ClassStance.h): a warrior with Warlock Stance keeps its demon
+            switch (GetCreatureTemplate()->type)
             {
-                case CLASS_WARLOCK:
-                    return GetCreatureTemplate()->type == CREATURE_TYPE_DEMON;
-                case CLASS_DEATH_KNIGHT:
-                    return GetCreatureTemplate()->type == CREATURE_TYPE_UNDEAD;
-                case CLASS_MAGE:
-                    return GetCreatureTemplate()->type == CREATURE_TYPE_ELEMENTAL;
+                case CREATURE_TYPE_DEMON:
+                    return ClassStance::KnowsClass(owner, CLASS_WARLOCK);
+                case CREATURE_TYPE_UNDEAD:
+                    return owner->GetClass() == CLASS_DEATH_KNIGHT;
+                case CREATURE_TYPE_ELEMENTAL:
+                    return ClassStance::KnowsClass(owner, CLASS_MAGE);
                 default:
                     return false;
             }

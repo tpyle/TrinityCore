@@ -17,6 +17,8 @@
 
 #include "WorldSession.h"
 #include "Battleground.h"
+#include "Chat.h"
+#include "ClassStance.h"
 #include "DB2Stores.h"
 #include "Log.h"
 #include "Player.h"
@@ -136,6 +138,27 @@ void WorldSession::HandleTraitsCommitConfig(WorldPackets::Traits::TraitsCommitCo
         return;
     }
 
+    // Class stances with shared talent points (ClassStance.h): the client's window counts the points the stances spent as
+    // unspent, so a commit spending them is refused here
+    if (newConfigState.Type == TraitConfigType::Combat && ClassStance::SharedTalentPoints())
+    {
+        auto spentOf = [](std::vector<WorldPackets::Traits::TraitEntry> const& entries)
+        {
+            std::map<int32, TraitMgr::SpentCurrency> spent;
+            TraitMgr::FillSpentCurrenciesMap(entries, spent);
+            auto itr = spent.find(3820);    // the Classic talent points
+            return itr != spent.end() ? itr->second.Total : 0;
+        };
+        WorldPackets::Traits::TraitConfig const oldConfigState(*existingConfig);
+        std::string error = ClassStance::CheckRealTalentCommit(_player, { spentOf(oldConfigState.Entries), spentOf(newConfigState.Entries) });
+        if (!error.empty())
+        {
+            ChatHandler(this).SendSysMessage(error);
+            SendPacket(WorldPackets::Traits::TraitConfigCommitFailed(configId, 0, AsUnderlyingType(TraitMgr::LearnResult::CantDoThatRightNow)).Write());
+            return;
+        }
+    }
+
     bool needsCastTime = newConfigState.Type == TraitConfigType::Combat && hasRemovedEntries;
 
     if (traitsCommitConfig.SavedLocalIdentifier)
@@ -144,6 +167,10 @@ void WorldSession::HandleTraitsCommitConfig(WorldPackets::Traits::TraitsCommitCo
         newConfigState.LocalIdentifier = savedConfig->LocalIdentifier;
 
     _player->UpdateTraitConfig(std::move(newConfigState), traitsCommitConfig.SavedConfigID, needsCastTime);
+
+    // shared talent points: the stance classes have more or fewer left now (the ForeverStances addon)
+    if (ClassStance::SharedTalentPoints() && ClassStance::GetLearnedClassMask(_player))
+        ClassStance::SendState(_player);
 }
 
 void WorldSession::HandleClassTalentsRequestNewConfig(WorldPackets::Traits::ClassTalentsRequestNewConfig& classTalentsRequestNewConfig)

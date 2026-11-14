@@ -15,6 +15,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "ClassStance.h"
 #include "Spell.h"
 #include "AccountMgr.h"
 #include "AreaTrigger.h"
@@ -2736,7 +2737,8 @@ void Spell::EffectTameCreature()
     if (creatureTarget->IsPet())
         return;
 
-    if (unitCaster->GetClass() != CLASS_HUNTER)
+    // a hunter, or anyone with Hunter Stance (ClassStance.h)
+    if (!unitCaster->IsPlayer() || !ClassStance::KnowsClass(unitCaster->ToPlayer(), CLASS_HUNTER))
         return;
 
     // cast finish successfully
@@ -5146,7 +5148,7 @@ void Spell::EffectCreateTamedPet()
     if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
         return;
 
-    if (!unitTarget || unitTarget->GetTypeId() != TYPEID_PLAYER || !unitTarget->GetPetGUID().IsEmpty() || unitTarget->GetClass() != CLASS_HUNTER)
+    if (!unitTarget || unitTarget->GetTypeId() != TYPEID_PLAYER || !unitTarget->GetPetGUID().IsEmpty() || !ClassStance::KnowsClass(unitTarget->ToPlayer(), CLASS_HUNTER))
         return;
 
     uint32 creatureEntry = effectInfo->MiscValue;

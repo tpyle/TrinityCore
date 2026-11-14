@@ -1,7 +1,7 @@
 /*
  * Class stances (game/Entities/Player/ClassStance.h): the stance bar auras 8104019-8104027 (custom-sql 071, scripts bound in
  * 072). Casting one makes the player fight as its class until it is cancelled or another is cast; casting the active one again
- * cancels it. Out of combat only, never the player's own class.
+ * cancels it. Out of combat only (unless ClassStance.AllowInCombat), never the player's own class.
  */
 
 #include "ScriptMgr.h"
@@ -27,7 +27,7 @@ class spell_class_stance : public SpellScript
             return SPELL_FAILED_DONT_REPORT;
         }
 
-        if (player->IsInCombat())
+        if (player->IsInCombat() && !ClassStance::AllowInCombat())
             return SPELL_FAILED_AFFECTING_COMBAT;
 
         return SPELL_CAST_OK;

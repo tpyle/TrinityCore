@@ -358,7 +358,10 @@ bool Condition::Meets(ConditionSourceInfo& sourceInfo) const
         }
         case CONDITION_CLASS:
         {
-            if (Unit const* unit = object->ToUnit())
+            // a player's learned class stances count (ClassStance.h): class quests, gossip and the like open to them too
+            if (Player const* player = object->ToPlayer())
+                condMeets = (player->GetKnownClassMask() & ConditionValue1) != 0;
+            else if (Unit const* unit = object->ToUnit())
                 condMeets = (unit->GetClassMask() & ConditionValue1) != 0;
             break;
         }

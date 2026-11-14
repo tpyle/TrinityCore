@@ -15,6 +15,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "ClassStance.h"
 #include "Unit.h"
 #include "ClassicRage.h"
 #include "ClassicArmor.h"
@@ -12600,7 +12601,8 @@ bool Unit::SetCharmedBy(Unit* charmer, CharmType type, AuraApplication const* au
                 AddUnitState(UNIT_STATE_POSSESSED);
                 break;
             case CHARM_TYPE_CHARM:
-                if (GetTypeId() == TYPEID_UNIT && charmer->GetClass() == CLASS_WARLOCK)
+                // Enslave Demon: a warlock, or anyone with Warlock Stance (ClassStance.h)
+                if (GetTypeId() == TYPEID_UNIT && charmer->IsPlayer() && ClassStance::KnowsClass(charmer->ToPlayer(), CLASS_WARLOCK))
                 {
                     CreatureTemplate const* cinfo = ToCreature()->GetCreatureTemplate();
                     if (cinfo && cinfo->type == CREATURE_TYPE_DEMON)
@@ -12707,7 +12709,8 @@ void Unit::RemoveCharmedBy(Unit* charmer)
                 RemoveUnitFlag(UNIT_FLAG_POSSESSED);
                 break;
             case CHARM_TYPE_CHARM:
-                if (GetTypeId() == TYPEID_UNIT && charmer->GetClass() == CLASS_WARLOCK)
+                // Enslave Demon: a warlock, or anyone with Warlock Stance (ClassStance.h)
+                if (GetTypeId() == TYPEID_UNIT && charmer->IsPlayer() && ClassStance::KnowsClass(charmer->ToPlayer(), CLASS_WARLOCK))
                 {
                     CreatureTemplate const* cinfo = ToCreature()->GetCreatureTemplate();
                     if (cinfo && cinfo->type == CREATURE_TYPE_DEMON)

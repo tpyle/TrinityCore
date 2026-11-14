@@ -15,6 +15,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "ClassStance.h"
 #include "SpellAuraEffects.h"
 #include "Battlefield.h"
 #include "BattlefieldMgr.h"
@@ -6377,7 +6378,7 @@ void AuraEffect::HandleOverridePetSpecs(AuraApplication const* aurApp, uint8 mod
     if (!player)
         return;
 
-    if (player->GetClass() != CLASS_HUNTER)
+    if (!ClassStance::KnowsClass(player, CLASS_HUNTER))
         return;
 
     Pet* pet = player->GetPet();

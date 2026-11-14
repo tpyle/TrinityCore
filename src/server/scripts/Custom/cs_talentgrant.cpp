@@ -103,10 +103,14 @@ bool SetGranted(ChatHandler* handler, Player* player, uint32 target)
         int32 owned, spent;
         GetTalentPoints(player, owned, spent);
         int32 removed = int32(granted - target);
-        // a learned class stance has the same points (ClassStance::GetTalentPoints) and its own spent ones
-        for (uint8 classId : ClassStance::Classes)
-            if (ClassStance::GetLearnedClassMask(player) & (1u << (classId - 1)))
-                spent = std::max<int32>(spent, ClassStance::GetSpentTalentPoints(player, classId));
+        // a learned class stance has the same points (ClassStance::GetTalentPoints) and its own spent ones; with shared talent
+        // points the real class and every stance spend from one pool
+        if (ClassStance::SharedTalentPoints())
+            spent += int32(ClassStance::GetAllStanceSpentTalentPoints(player));
+        else
+            for (uint8 classId : ClassStance::Classes)
+                if (ClassStance::GetLearnedClassMask(player) & (1u << (classId - 1)))
+                    spent = std::max<int32>(spent, ClassStance::GetSpentTalentPoints(player, classId));
         if (owned - removed < spent)
         {
             handler->PSendSysMessage("%s has spent %d of %d talent points, so %d granted points cannot be taken away. Reset their talents first (.reset talents, and the stance talents in the addon).",
