@@ -461,6 +461,40 @@ namespace ClassStance
         SendAddon(player, "SKLE");
     }
 
+    void SendSpells(Player* player, uint8 classId)
+    {
+        // SPLB <class>, SPLS <class> <skill:name;...>, SPL <class> <spell:skill,...>, SPLE <class>: the spellbook spells (active,
+        // not disabled) of the class's spell family, each with the class skill line it is in (0 for none)
+        SendAddon(player, fmt::format("SPLB {}", classId));
+        std::vector<std::string> spells;
+        std::map<uint32, std::string> skills;
+        for (auto const& [spellId, spell] : player->GetSpellMap())
+        {
+            if (spell.state == PLAYERSPELL_REMOVED || spell.disabled || !spell.active)
+                continue;
+            SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId, DIFFICULTY_NONE);
+            if (!info || GetClassOfSpell(info) != classId)
+                continue;
+
+            uint32 skillId = 0;
+            SkillLineAbilityMapBounds bounds = sSpellMgr->GetSkillLineAbilityMapBounds(spellId);
+            for (auto itr = bounds.first; itr != bounds.second && !skillId; ++itr)
+                if (SkillLineEntry const* line = sSkillLineStore.LookupEntry(itr->second->SkillLine))
+                    if (line->CategoryID == SKILL_CATEGORY_CLASS)
+                        skillId = line->ID;
+            if (skillId && !skills.contains(skillId))
+                skills[skillId] = sSkillLineStore.AssertEntry(skillId)->DisplayName[LOCALE_enUS];
+            spells.push_back(fmt::format("{}:{}", spellId, skillId));
+        }
+
+        std::vector<std::string> skillEntries;
+        for (auto const& [skillId, name] : skills)
+            skillEntries.push_back(fmt::format("{}:{}", skillId, name));
+        SendList(player, fmt::format("SPLS {} ", classId), skillEntries, ';');
+        SendList(player, fmt::format("SPL {} ", classId), spells, ',');
+        SendAddon(player, fmt::format("SPLE {}", classId));
+    }
+
     void HandleAddonMessage(Player* player, std::string const& text)
     {
         std::vector<std::string_view> args = Trinity::Tokenize(text, ' ', false);
@@ -499,5 +533,11 @@ namespace ClassStance
         }
         else if (command == "SKILLS")
             SendSkills(player);
+        else if (command == "SPELLS")
+        {
+            uint8 const classId = uint8(number(1));
+            if (GetLearnedClassMask(player) & (1u << (classId - 1)))
+                SendSpells(player, classId);
+        }
     }
 }

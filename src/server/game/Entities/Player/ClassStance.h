@@ -77,6 +77,8 @@ namespace ClassStance
     void SendState(Player* player);
     void SendTalents(Player* player, uint8 classId);
     void SendSkills(Player* player);
+    // the stance class's spells the player knows, by skill line (the addon's stance spellbook)
+    void SendSpells(Player* player, uint8 classId);
 }
 
 #endif
