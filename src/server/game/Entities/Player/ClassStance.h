@@ -58,11 +58,14 @@ namespace ClassStance
     // the stance class's skill lines and its armor and weapon skills, as a new character of that class gets them
     void LearnClassSkills(Player* player, uint8 classId);
 
-    // Stance talents (the ForeverStances addon draws the trees, custom-sql 073 keeps the picks): every learned stance class has
-    // its own pool of talent points, as many as the real class owns (levels, Rate.Talent, granted points and Tomes of Talent),
-    // spent by the Classic rules (5 points in the tree a tier, prerequisites). A talent is its rank 1 spell with the rank as a trait, as the real class's talents are. They are
-    // active at all times, or with ClassStance.TalentsAlwaysActive = 0 only while their class's stance is.
+    // Stance talents (WoW Forever's trait trees, custom-sql 075; the ForeverStances addon draws them, 073 keeps the picks by trait
+    // node entry): every learned stance class has its own pool of talent points, as many as the real class owns (levels,
+    // Rate.Talent, granted points and Tomes of Talent), spent by the trees' rules (the points in the tab each row asks,
+    // prerequisites at full rank). A talent is its trait's spell with the rank as a trait, as the real class's talents are. They
+    // are active at all times, or with ClassStance.TalentsAlwaysActive = 0 only while their class's stance is.
     bool TalentsAlwaysActive();
+    // the stance talent trees, world.class_stance_talent (custom-sql 075); at startup
+    void LoadTalentNodes();
     // ClassStance.AllowInCombat: stances may be changed in combat (the addon's bars, keys and panel still change only out of
     // combat: the client does not let an addon change them in combat)
     bool AllowInCombat();

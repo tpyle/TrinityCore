@@ -182,46 +182,24 @@ namespace ClassStance
 
     namespace
     {
-        // TalentTab IDs of each class's three trees (client TalentTab.db2; tools/class_stance_addon_data.py writes the same)
-        uint8 GetTabClass(uint32 tabId)
+        // the stance talent trees: WoW Forever's trait trees as the client's talent window shows them (world.class_stance_talent,
+        // custom-sql 075, written by tools/class_stance_addon_data.py with the addon's data), by trait node entry
+        struct TalentNode
         {
-            switch (tabId)
-            {
-                case 161: case 163: case 164: return 1;     // warrior
-                case 381: case 382: case 383: return 2;     // paladin
-                case 361: case 362: case 363: return 3;     // hunter
-                case 181: case 182: case 183: return 4;     // rogue
-                case 201: case 202: case 203: return 5;     // priest
-                case 261: case 262: case 263: return 7;     // shaman
-                case 41: case 61: case 81:    return 8;     // mage
-                case 301: case 302: case 303: return 9;     // warlock
-                case 281: case 282: case 283: return 11;    // druid
-                default: return 0;
-            }
-        }
+            uint8 ClassId = 0;
+            uint32 Definition = 0;      // TraitDefinition: learned as Spell with the rank as a trait
+            uint32 Spell = 0;
+            uint8 Tab = 0;
+            uint8 Need = 0;             // points in the tab its row asks
+            uint8 MaxRanks = 0;
+            std::array<uint32, 3> Prereqs = { };   // entries that must be at their full rank
+        };
+        std::unordered_map<uint32, TalentNode> talentNodes;
 
-        uint8 GetMaxRank(TalentEntry const* talent)
+        TalentNode const* GetNode(uint32 entry)
         {
-            uint8 ranks = 0;
-            for (uint32 spell : talent->SpellRank)
-                if (spell)
-                    ++ranks;
-            return ranks;
-        }
-
-        // the trait definition of a talent's rank 1 spell, as the real class's talents learn it
-        uint32 GetTraitDefinition(uint32 spellId)
-        {
-            static std::unordered_map<uint32, uint32> const definitions = []
-            {
-                std::unordered_map<uint32, uint32> map;
-                for (TraitDefinitionEntry const* definition : sTraitDefinitionStore)
-                    if (definition->SpellID)
-                        map.emplace(definition->SpellID, definition->ID);
-                return map;
-            }();
-            auto itr = definitions.find(spellId);
-            return itr != definitions.end() ? itr->second : 0;
+            auto itr = talentNodes.find(entry);
+            return itr != talentNodes.end() ? &itr->second : nullptr;
         }
 
         bool IsTalentActive(Player const* player, uint8 classId)
@@ -230,41 +208,29 @@ namespace ClassStance
                 && (talentsAlwaysActive || player->GetClassStance() == classId);
         }
 
-        void ApplyTalent(Player* player, TalentEntry const* talent, uint8 rank, bool apply)
+        void ApplyTalent(Player* player, TalentNode const& node, uint8 rank, bool apply)
         {
-            uint32 const firstSpell = talent->SpellRank[0];
-            if (uint32 definition = GetTraitDefinition(firstSpell))
-            {
-                if (apply)
-                    player->LearnSpell(firstSpell, true, 0, false, PlayerSpellTrait{ .DefinitionId = int32(definition), .Rank = rank });
-                else
-                    player->RemoveSpell(firstSpell, false, false);
+            if (!node.Spell)
                 return;
-            }
-
-            // no trait for it: the Classic rank spells, the highest one only
-            for (uint8 i = 0; i < GetMaxRank(talent); ++i)
-                if (player->HasSpell(talent->SpellRank[i]))
-                    player->RemoveSpell(talent->SpellRank[i], false, false);
             if (apply && rank)
-                player->LearnSpell(talent->SpellRank[rank - 1], true);
+                player->LearnSpell(node.Spell, true, 0, false, PlayerSpellTrait{ .DefinitionId = int32(node.Definition), .Rank = rank });
+            else
+                player->RemoveSpell(node.Spell, false, false);
         }
 
         void ApplyClassTalents(Player* player, uint8 classId, bool apply)
         {
-            for (auto const& [talentId, rank] : player->GetClassStanceTalents())
-                if (TalentEntry const* talent = sTalentStore.LookupEntry(talentId))
-                    if (GetTabClass(talent->TabID) == classId)
-                        ApplyTalent(player, talent, rank, apply);
+            for (auto const& [entry, rank] : player->GetClassStanceTalents())
+                if (TalentNode const* node = GetNode(entry); node && node->ClassId == classId)
+                    ApplyTalent(player, *node, rank, apply);
         }
 
-        uint32 GetSpentInTab(Player const* player, uint32 tabId)
+        uint32 GetSpentInTab(Player const* player, uint8 classId, uint8 tab)
         {
             uint32 spent = 0;
-            for (auto const& [talentId, rank] : player->GetClassStanceTalents())
-                if (TalentEntry const* talent = sTalentStore.LookupEntry(talentId))
-                    if (talent->TabID == tabId)
-                        spent += rank;
+            for (auto const& [entry, rank] : player->GetClassStanceTalents())
+                if (TalentNode const* node = GetNode(entry); node && node->ClassId == classId && node->Tab == tab)
+                    spent += rank;
             return spent;
         }
 
@@ -301,6 +267,32 @@ namespace ClassStance
     bool TalentsAlwaysActive()
     {
         return talentsAlwaysActive;
+    }
+
+    void LoadTalentNodes()
+    {
+        talentNodes.clear();
+        QueryResult result = WorldDatabase.Query("SELECT entry, class, definition, spell, tab, need, max_ranks, prereq1, prereq2, prereq3 FROM class_stance_talent");
+        if (!result)
+        {
+            TC_LOG_ERROR("server.loading", "Class stances: no talents in world.class_stance_talent (custom-sql 075)");
+            return;
+        }
+        do
+        {
+            Field* fields = result->Fetch();
+            TalentNode& node = talentNodes[fields[0].GetUInt32()];
+            node.ClassId = fields[1].GetUInt8();
+            node.Definition = fields[2].GetUInt32();
+            node.Spell = fields[3].GetUInt32();
+            node.Tab = fields[4].GetUInt8();
+            node.Need = fields[5].GetUInt8();
+            node.MaxRanks = fields[6].GetUInt8();
+            node.Prereqs = { fields[7].GetUInt32(), fields[8].GetUInt32(), fields[9].GetUInt32() };
+            if (!sSpellMgr->GetSpellInfo(node.Spell, DIFFICULTY_NONE))
+                TC_LOG_ERROR("server.loading", "Class stances: talent {} learns spell {}, which does not exist", fields[0].GetUInt32(), node.Spell);
+        } while (result->NextRow());
+        TC_LOG_INFO("server.loading", ">> Loaded {} class stance talents", talentNodes.size());
     }
 
     namespace
@@ -357,10 +349,9 @@ namespace ClassStance
     uint32 GetAllStanceSpentTalentPoints(Player const* player)
     {
         uint32 spent = 0;
-        for (auto const& [talentId, rank] : player->GetClassStanceTalents())
-            if (TalentEntry const* talent = sTalentStore.LookupEntry(talentId))
-                if (GetTabClass(talent->TabID))
-                    spent += rank;
+        for (auto const& [entry, rank] : player->GetClassStanceTalents())
+            if (GetNode(entry))
+                spent += rank;
         return spent;
     }
 
@@ -384,10 +375,9 @@ namespace ClassStance
     uint32 GetSpentTalentPoints(Player const* player, uint8 classId)
     {
         uint32 spent = 0;
-        for (auto const& [talentId, rank] : player->GetClassStanceTalents())
-            if (TalentEntry const* talent = sTalentStore.LookupEntry(talentId))
-                if (GetTabClass(talent->TabID) == classId)
-                    spent += rank;
+        for (auto const& [entry, rank] : player->GetClassStanceTalents())
+            if (TalentNode const* node = GetNode(entry); node && node->ClassId == classId)
+                spent += rank;
         return spent;
     }
 
@@ -398,25 +388,26 @@ namespace ClassStance
         if (player->IsInCombat())
             return "Not in combat.";
 
-        TalentEntry const* talent = sTalentStore.LookupEntry(talentId);
-        if (!talent || GetTabClass(talent->TabID) != classId || !GetMaxRank(talent))
+        TalentNode const* node = GetNode(talentId);
+        if (!node || node->ClassId != classId || !node->MaxRanks)
             return "Unknown talent.";
 
         auto& talents = player->GetClassStanceTalents();
         uint8 const rank = talents.contains(talentId) ? talents[talentId] : 0;
-        if (rank >= GetMaxRank(talent))
+        if (rank >= node->MaxRanks)
             return "That talent is at its highest rank.";
         if (GetSpentTalentPoints(player, classId) >= GetTalentPoints(player, classId))
             return "You have no talent points left for that class.";
-        if (GetSpentInTab(player, talent->TabID) < uint32(talent->TierID) * 5)
-            return "Spend more points in that tree first.";
-        for (uint8 i = 0; i < talent->PrereqTalent.size(); ++i)
+        if (GetSpentInTab(player, classId, node->Tab) < node->Need)
+            return fmt::format("Requires {} points in that tree.", node->Need);
+        for (uint32 prereq : node->Prereqs)
         {
-            if (!talent->PrereqTalent[i])
+            if (!prereq)
                 continue;
-            auto itr = talents.find(talent->PrereqTalent[i]);
-            if (itr == talents.end() || itr->second < talent->PrereqRank[i] + 1)
-                return "That talent needs another talent first.";
+            TalentNode const* parent = GetNode(prereq);
+            auto itr = talents.find(prereq);
+            if (parent && (itr == talents.end() || itr->second < parent->MaxRanks))
+                return "That talent needs another talent at its highest rank first.";
         }
 
         talents[talentId] = rank + 1;
@@ -425,9 +416,11 @@ namespace ClassStance
 
         if (IsTalentActive(player, classId))
         {
+            // off and on again: learning a known spell with a new rank only relinks the trait, and a passive aura (Divine Intellect)
+            // kept its first rank's amount
             if (rank)
-                ApplyTalent(player, talent, rank, false);
-            ApplyTalent(player, talent, rank + 1, true);
+                ApplyTalent(player, *node, rank, false);
+            ApplyTalent(player, *node, rank + 1, true);
         }
         return "";
     }
@@ -440,8 +433,8 @@ namespace ClassStance
         auto& talents = player->GetClassStanceTalents();
         std::erase_if(talents, [classId](auto const& pair)
         {
-            TalentEntry const* talent = sTalentStore.LookupEntry(pair.first);
-            return !talent || GetTabClass(talent->TabID) == classId;
+            TalentNode const* node = GetNode(pair.first);
+            return !node || node->ClassId == classId;
         });
         CharacterDatabase.DirectPExecute("DELETE FROM character_class_stance_talent WHERE guid = {} AND class = {}", player->GetGUID().GetCounter(), classId);
     }
@@ -457,6 +450,26 @@ namespace ClassStance
                 Field* fields = result->Fetch();
                 talents[fields[0].GetUInt32()] = fields[1].GetUInt8();
             } while (result->NextRow());
+        }
+
+        // a pick of a talent no longer in the trees, or above its ranks (the trees changed): dropped or lowered, the points back
+        for (auto itr = talents.begin(); itr != talents.end();)
+        {
+            TalentNode const* node = GetNode(itr->first);
+            if (!node)
+            {
+                CharacterDatabase.PExecute("DELETE FROM character_class_stance_talent WHERE guid = {} AND talent = {}",
+                    player->GetGUID().GetCounter(), itr->first);
+                itr = talents.erase(itr);
+                continue;
+            }
+            if (itr->second > node->MaxRanks)
+            {
+                itr->second = node->MaxRanks;
+                CharacterDatabase.PExecute("UPDATE character_class_stance_talent SET `rank` = {} WHERE guid = {} AND talent = {}",
+                    itr->second, player->GetGUID().GetCounter(), itr->first);
+            }
+            ++itr;
         }
 
         for (uint8 classId : Classes)
@@ -505,10 +518,9 @@ namespace ClassStance
         // TALB <class>, then TAL <class> <talent:rank,...> as needed, then TALE <class> <points> <spent>
         SendAddon(player, fmt::format("TALB {}", classId));
         std::vector<std::string> entries;
-        for (auto const& [talentId, rank] : player->GetClassStanceTalents())
-            if (TalentEntry const* talent = sTalentStore.LookupEntry(talentId))
-                if (GetTabClass(talent->TabID) == classId)
-                    entries.push_back(fmt::format("{}:{}", talentId, rank));
+        for (auto const& [entry, rank] : player->GetClassStanceTalents())
+            if (TalentNode const* node = GetNode(entry); node && node->ClassId == classId)
+                entries.push_back(fmt::format("{}:{}", entry, rank));
         SendList(player, fmt::format("TAL {} ", classId), entries, ',');
         SendAddon(player, fmt::format("TALE {} {} {}", classId, GetTalentPoints(player, classId), GetSpentTalentPoints(player, classId)));
     }

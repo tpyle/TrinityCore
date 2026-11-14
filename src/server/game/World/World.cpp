@@ -1948,6 +1948,9 @@ bool World::SetInitialWorldSettings()
     TC_LOG_INFO("server.loading", "Loading Trainers...");
     sObjectMgr->LoadTrainers();                                 // must be after load CreatureTemplate
 
+    TC_LOG_INFO("server.loading", "Loading class stance talents...");
+    ClassStance::LoadTalentNodes();                             // ClassStance.h, world.class_stance_talent (custom-sql 075)
+
     TC_LOG_INFO("server.loading", "Loading Gossip menu...");
     sObjectMgr->LoadGossipMenu();
 
