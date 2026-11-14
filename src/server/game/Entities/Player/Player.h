@@ -2016,6 +2016,17 @@ class TC_GAME_API Player final : public Unit, public GridObject<Player>
         void LearnCustomSpells();
         void LearnDefaultSkills();
         void LearnDefaultSkill(SkillRaceClassInfoEntry const* rcInfo);
+
+        // Class stances (ClassStance.h): the class the player fights as (the active stance's, else the real class), and every class
+        // the player may learn, wear and hold skills of (the real class plus the classes of their learned stances)
+        uint8 GetEffectiveClass() const { return m_classStance ? m_classStance : GetClass(); }
+        uint8 GetClassStance() const { return m_classStance; }
+        void SetClassStance(uint8 classId);
+        uint32 GetKnownClassMask() const;
+        uint32 GetKnownClassesBaseMana(uint8 level) const;
+        void UpdateClassStanceMana();
+        // the abilities every held skill line teaches the classes of learned stances (ClassStance.h)
+        void LearnClassStanceSkillSpells();
         void LearnQuestRewardedSpells();
         void LearnQuestRewardedSpells(Quest const* quest);
         void AddTemporarySpell(uint32 spellId);
@@ -2347,6 +2358,8 @@ class TC_GAME_API Player final : public Unit, public GridObject<Player>
         WorldSession* GetSession() const { return m_session; }
 
     protected:
+        uint8 m_classStance = 0;                            // ClassStance.h: the active stance's class, 0 for none
+
         UF::UpdateFieldFlag GetUpdateFieldFlagsFor(Player const* target) const override;
         void BuildValuesCreate(UF::UpdateFieldFlag flags, ByteBuffer& data, Player const* target) const override;
         void BuildValuesUpdate(UF::UpdateFieldFlag flags, ByteBuffer& data, Player const* target) const override;

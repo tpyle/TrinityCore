@@ -379,7 +379,7 @@ float Player::GetManaBonusFromIntellect() const
 // Classic 1.60 (vanilla, VMaNGOS "Nostalrius: base dodge per class"): base melee crit and dodge of the class
 float Player::GetClassicBaseCritAndDodge() const
 {
-    switch (GetClass())
+    switch (GetEffectiveClass())
     {
         case CLASS_DRUID:   return 0.9f;
         case CLASS_MAGE:    return 3.2f;
@@ -402,7 +402,12 @@ float Player::OCTRegenMPPerSpirit() const
 {
     float spirit = GetStat(STAT_SPIRIT);
     float perTick;
-    switch (GetClass())
+    // a class stance (ClassStance.h) regenerates as its class; in the stance of a class without mana (warrior, rogue) the mana
+    // pool still regenerates as the real class's
+    uint8 regenClass = GetEffectiveClass();
+    if (regenClass == CLASS_WARRIOR || regenClass == CLASS_ROGUE)
+        regenClass = GetClass();
+    switch (regenClass)
     {
         case CLASS_MAGE:
         case CLASS_PRIEST:  perTick = spirit / 4.0f + 12.5f; break;
@@ -421,7 +426,7 @@ float Player::OCTRegenHPPerSpirit() const
 {
     float spirit = GetStat(STAT_SPIRIT);
     float regen;
-    switch (GetClass())
+    switch (GetEffectiveClass())
     {
         case CLASS_DRUID:
         case CLASS_MAGE:    regen = spirit * 0.11f + 1.0f; break;
@@ -451,7 +456,7 @@ void Player::UpdateAttackPowerAndDamage(bool ranged)
         float agility = GetStat(STAT_AGILITY);
         if (!ranged)
         {
-            switch (GetClass())
+            switch (GetEffectiveClass())
             {
                 case CLASS_WARRIOR:
                 case CLASS_PALADIN:
@@ -476,7 +481,7 @@ void Player::UpdateAttackPowerAndDamage(bool ranged)
         }
         else
         {
-            switch (GetClass())
+            switch (GetEffectiveClass())
             {
                 case CLASS_HUNTER:
                     val2 = level * 2.0f + agility - 10.0f;
@@ -813,7 +818,7 @@ void Player::UpdateParryPercentage()
 {
     // No parry
     float value = 0.0f;
-    uint32 pclass = GetClass() - 1;
+    uint32 pclass = GetEffectiveClass() - 1;
     if (CanParry() && parry_cap[pclass] > 0.0f)
     {
         float nondiminishing  = 5.0f;
@@ -825,7 +830,7 @@ void Player::UpdateParryPercentage()
         nondiminishing += GetTotalAuraModifier(SPELL_AURA_MOD_PARRY_PERCENT);
 
         // apply diminishing formula to diminishing parry chance
-        value = CalculateDiminishingReturns(parry_cap, GetClass(), nondiminishing, diminishing);
+        value = CalculateDiminishingReturns(parry_cap, GetEffectiveClass(), nondiminishing, diminishing);
 
         if (sWorld->getBoolConfig(CONFIG_STATS_LIMITS_ENABLE))
              value = value > sWorld->getFloatConfig(CONFIG_STATS_LIMITS_PARRY) ? sWorld->getFloatConfig(CONFIG_STATS_LIMITS_PARRY) : value;
@@ -867,7 +872,7 @@ void Player::UpdateDodgePercentage()
     diminishing += GetRatingBonusValue(CR_DODGE);
 
     // apply diminishing formula to diminishing dodge chance
-    float value = CalculateDiminishingReturns(dodge_cap, GetClass(), nondiminishing, diminishing);
+    float value = CalculateDiminishingReturns(dodge_cap, GetEffectiveClass(), nondiminishing, diminishing);
 
     if (sWorld->getBoolConfig(CONFIG_STATS_LIMITS_ENABLE))
          value = value > sWorld->getFloatConfig(CONFIG_STATS_LIMITS_DODGE) ? sWorld->getFloatConfig(CONFIG_STATS_LIMITS_DODGE) : value;

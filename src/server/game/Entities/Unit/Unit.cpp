@@ -6087,6 +6087,13 @@ void Unit::SetInitialPowerValue(Powers powerType)
         SetFullPower(powerType);
 }
 
+uint8 Unit::GetCombatClass() const
+{
+    if (Player const* player = ToPlayer())
+        return player->GetEffectiveClass();
+    return GetClass();
+}
+
 Powers Unit::CalculateDisplayPowerType() const
 {
     Powers displayPower = POWER_MANA;
@@ -6114,7 +6121,8 @@ Powers Unit::CalculateDisplayPowerType() const
             }
             else
             {
-                ChrClassesEntry const* cEntry = sChrClassesStore.LookupEntry(GetClass());
+                // a class stance (ClassStance.h) shows its class's resource, as a druid's forms do theirs
+                ChrClassesEntry const* cEntry = sChrClassesStore.LookupEntry(GetCombatClass());
                 if (cEntry && cEntry->DisplayPower < MAX_POWERS)
                     displayPower = Powers(cEntry->DisplayPower);
 
@@ -10522,7 +10530,7 @@ void Unit::SetPower(Powers power, int32 val, bool withPowerUpdate /*= true*/)
 
     // Diagnostic: a warrior's combo points are only meant to come from a dodged attack (Overpower), yet damage_parity runs hold 1-5 of them with no dodge
     // on record. Logs who raised them (the spell in progress, and the call when no spell is), a few dozen lines at most.
-    if (power == POWER_COMBO_POINTS && val > oldPower && GetClass() == CLASS_WARRIOR && IsPlayer())
+    if (power == POWER_COMBO_POINTS && val > oldPower && GetCombatClass() == CLASS_WARRIOR && IsPlayer())
     {
         static std::atomic<uint32> loggedWarriorComboRises{ 0 };
         if (loggedWarriorComboRises.fetch_add(1) < 60)
@@ -11437,7 +11445,7 @@ void Unit::ClearAllReactives()
         ModifyAuraState(AURA_STATE_DEFENSIVE, false);
     if (HasAuraState(AURA_STATE_DEFENSIVE_2))
         ModifyAuraState(AURA_STATE_DEFENSIVE_2, false);
-    if (GetClass() == CLASS_WARRIOR && IsPlayer())
+    if (GetCombatClass() == CLASS_WARRIOR && IsPlayer())
         SetPower(POWER_COMBO_POINTS, 0);
 }
 
@@ -11466,7 +11474,7 @@ void Unit::UpdateReactives(uint32 p_time)
                         ModifyAuraState(AURA_STATE_DEFENSIVE_2, false);
                     break;
                 case REACTIVE_OVERPOWER:
-                    if (GetClass() == CLASS_WARRIOR && IsPlayer())
+                    if (GetCombatClass() == CLASS_WARRIOR && IsPlayer())
                         SetPower(POWER_COMBO_POINTS, 0);
                     break;
                 default:

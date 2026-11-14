@@ -50,6 +50,7 @@
 #include "ClassicOpcodes.h"
 #include "ClassicSpellRank.h"
 #include "CinematicMgr.h"
+#include "ClassStance.h"
 #include "ClubUtils.h"
 #include "CombatLogPackets.h"
 #include "CombatPackets.h"
@@ -2292,8 +2293,8 @@ void Player::GiveLevel(uint8 level)
     PlayerLevelInfo info;
     sObjectMgr->GetPlayerLevelInfo(GetRace(), GetClass(), level, &info);
 
-    uint32 basemana = 0;
-    sObjectMgr->GetPlayerClassLevelInfo(GetClass(), level, basemana);
+    // the most base mana of the real class and of learned class stances (ClassStance.h)
+    uint32 basemana = GetKnownClassesBaseMana(level);
 
     WorldPackets::Misc::LevelUpInfo packet;
     packet.Level = level;
@@ -2618,8 +2619,8 @@ void Player::InitStatsForLevel(bool reapplyMods)
     if (reapplyMods)                                        //reapply stats values only on .reset stats (level) command
         _RemoveAllStatBonuses();
 
-    uint32 basemana = 0;
-    sObjectMgr->GetPlayerClassLevelInfo(GetClass(), GetLevel(), basemana);
+    // the most base mana of the real class and of learned class stances (ClassStance.h)
+    uint32 basemana = GetKnownClassesBaseMana(GetLevel());
 
     PlayerLevelInfo info;
     sObjectMgr->GetPlayerLevelInfo(GetRace(), GetClass(), GetLevel(), &info);
@@ -3317,7 +3318,7 @@ bool Player::AddSpell(uint32 spellId, bool active, bool learning, bool dependent
 
             if (new_skill_max_value == 0)
             {
-                if (SkillRaceClassInfoEntry const* rcInfo = sDB2Manager.GetSkillRaceClassInfo(spellLearnSkill->skill, GetRace(), GetClass()))
+                if (SkillRaceClassInfoEntry const* rcInfo = ClassStance::GetSkillRaceClassInfo(this, spellLearnSkill->skill, GetRace()))
                 {
                     switch (GetSkillRangeType(rcInfo))
                     {
@@ -3390,7 +3391,7 @@ bool Player::AddSpell(uint32 spellId, bool active, bool learning, bool dependent
             // Runeforging special case
             if ((_spell_idx->second->GetAcquireMethod() == SkillLineAbilityAcquireMethod::AutomaticCharLevel && !HasSkill(_spell_idx->second->SkillLine)) || ((_spell_idx->second->SkillLine == SKILL_RUNEFORGING) && _spell_idx->second->TrivialSkillLineRankHigh == 0))
             {
-                if (SkillRaceClassInfoEntry const* rcInfo = sDB2Manager.GetSkillRaceClassInfo(_spell_idx->second->SkillLine, GetRace(), GetClass()))
+                if (SkillRaceClassInfoEntry const* rcInfo = ClassStance::GetSkillRaceClassInfo(this, _spell_idx->second->SkillLine, GetRace()))
                     LearnDefaultSkill(rcInfo);
             }
             // Classic 1.60: a weapon spell taught by a weapon master (Two-Handed Maces 199, Two-Handed Axes 197 for a shaman) opens its
@@ -3406,7 +3407,7 @@ bool Player::AddSpell(uint32 spellId, bool active, bool learning, bool dependent
                     || _spell_idx->second->SkillLine == SKILL_BEAST_TRAINING)
                 && !HasSkill(_spell_idx->second->SkillLine))
             {
-                if (SkillRaceClassInfoEntry const* rcInfo = sDB2Manager.GetSkillRaceClassInfo(_spell_idx->second->SkillLine, GetRace(), GetClass()))
+                if (SkillRaceClassInfoEntry const* rcInfo = ClassStance::GetSkillRaceClassInfo(this, _spell_idx->second->SkillLine, GetRace()))
                 {
                     // Lockpicking starts at 1 and rises by picking locks, as in vanilla (README: Pick Lock at blacksmiths)
                     LearnDefaultSkill(rcInfo);
@@ -3514,6 +3515,15 @@ void Player::LearnSpell(uint32 spell_id, bool dependent, int32 fromSkill /*= 0*/
 
     bool learning = AddSpell(spell_id, active, true, dependent, false, false, fromSkill, favorite, trait);
 
+    // a class stance (ClassStance.h) brings its class's skill lines, armor and weapon skills, and its base mana
+    if (learning)
+        if (uint8 stanceClass = ClassStance::GetClassForSpell(spell_id); stanceClass && ClassStance::IsEnabled())
+        {
+            ClassStance::LearnClassSkills(this, stanceClass);
+            LearnClassStanceSkillSpells();      // a skill held already (Mail, Shield) teaches the new class's abilities too
+            UpdateClassStanceMana();
+        }
+
     // prevent duplicated entires in spell book, also not send if not in world (loading)
     if (learning && IsInWorld())
     {
@@ -3557,6 +3567,10 @@ void Player::RemoveSpell(uint32 spell_id, bool disabled /*= false*/, bool learn_
 
     if (itr->second.state == PLAYERSPELL_REMOVED || (disabled && itr->second.disabled) || itr->second.state == PLAYERSPELL_TEMPORARY)
         return;
+
+    // an unlearned class stance (ClassStance.h) ends
+    if (ClassStance::GetClassForSpell(spell_id))
+        RemoveAurasDueToSpell(spell_id);
 
     // unlearn non talent higher ranks (recursive)
     if (uint32 nextSpell = sSpellMgr->GetNextSpellInChain(spell_id))
@@ -3638,7 +3652,7 @@ void Player::RemoveSpell(uint32 spell_id, bool disabled /*= false*/, bool learn_
 
                 if (new_skill_max_value == 0)
                 {
-                    if (SkillRaceClassInfoEntry const* rcInfo = sDB2Manager.GetSkillRaceClassInfo(prevSkill->skill, GetRace(), GetClass()))
+                    if (SkillRaceClassInfoEntry const* rcInfo = ClassStance::GetSkillRaceClassInfo(this, prevSkill->skill, GetRace()))
                     {
                         switch (GetSkillRangeType(rcInfo))
                         {
@@ -5521,7 +5535,7 @@ float Player::GetTotalBaseModValue(BaseModGroup modGroup) const
 static float ClassicAgilityRate(Player const* player, bool dodge)
 {
     float level1, level60;
-    switch (player->GetClass())
+    switch (player->GetEffectiveClass())
     {
         case CLASS_ROGUE:   level1 = dodge ? 1.1f : 2.2f;  level60 = dodge ? 14.5f : 29.0f; break;
         case CLASS_HUNTER:  level1 = dodge ? 1.8f : 3.5f;  level60 = dodge ? 26.5f : 53.0f; break;
@@ -5550,7 +5564,7 @@ void Player::GetDodgeFromAgility(float& diminishing, float& nondiminishing) cons
 float Player::GetSpellCritFromIntellect() const
 {
     float base, rate60;
-    switch (GetClass())
+    switch (GetEffectiveClass())
     {
         case CLASS_MAGE:    base = 0.2f; rate60 = 59.5f; break;
         case CLASS_PRIEST:  base = 0.8f; rate60 = 59.2f; break;
@@ -6223,7 +6237,7 @@ void Player::UpdateSkillsForLevel()
             continue;
 
         uint32 pskill = itr->first;
-        SkillRaceClassInfoEntry const* rcEntry = sDB2Manager.GetSkillRaceClassInfo(pskill, GetRace(), GetClass());
+        SkillRaceClassInfoEntry const* rcEntry = ClassStance::GetSkillRaceClassInfo(this, pskill, GetRace());
         if (!rcEntry)
             continue;
 
@@ -6332,7 +6346,7 @@ void Player::SetSkill(uint32 id, uint16 step, uint16 newVal, uint16 maxVal)
             // enable parent skill line if missing
             // Classic 1.60: profession child lines must not set the parent's rank, Classic ranks come from the rank spells
             if (skillEntry->ParentSkillLineID && !classicProfessionChild && skillEntry->ParentTierIndex > 0 && GetSkillStep(skillEntry->ParentSkillLineID) < skillEntry->ParentTierIndex)
-                if (SkillRaceClassInfoEntry const* rcEntry = sDB2Manager.GetSkillRaceClassInfo(skillEntry->ParentSkillLineID, GetRace(), GetClass()))
+                if (SkillRaceClassInfoEntry const* rcEntry = ClassStance::GetSkillRaceClassInfo(this, skillEntry->ParentSkillLineID, GetRace()))
                     if (SkillTiersEntry const* tier = sObjectMgr->GetSkillTier(rcEntry->SkillTierID))
                         SetSkill(skillEntry->ParentSkillLineID, skillEntry->ParentTierIndex, std::max<uint16>(GetPureSkillValue(skillEntry->ParentSkillLineID), 1), tier->GetValueForTierIndex(skillEntry->ParentTierIndex - 1));
 
@@ -6462,7 +6476,7 @@ void Player::SetSkill(uint32 id, uint16 step, uint16 newVal, uint16 maxVal)
             // Classic ranks come from the rank spells (First Aid became 1/300 instead of 1/75)
             if (skillEntry->ParentTierIndex > 0 && !classicProfessionChild)
             {
-                if (SkillRaceClassInfoEntry const* rcEntry = sDB2Manager.GetSkillRaceClassInfo(skillEntry->ParentSkillLineID, GetRace(), GetClass()))
+                if (SkillRaceClassInfoEntry const* rcEntry = ClassStance::GetSkillRaceClassInfo(this, skillEntry->ParentSkillLineID, GetRace()))
                 {
                     if (SkillTiersEntry const* tier = sObjectMgr->GetSkillTier(rcEntry->SkillTierID))
                     {
@@ -12183,7 +12197,7 @@ InventoryResult Player::CanUseItem(ItemTemplate const* proto, bool skipRequiredL
     if (proto->HasFlag(ITEM_FLAG2_FACTION_ALLIANCE) && GetTeam() != ALLIANCE)
         return EQUIP_ERR_CANT_EQUIP_EVER;
 
-    if ((proto->GetAllowableClass() & GetClassMask()) == 0 || !proto->GetAllowableRace().HasRace(GetRace()))
+    if ((proto->GetAllowableClass() & GetKnownClassMask()) == 0 || !proto->GetAllowableRace().HasRace(GetRace()))
         return EQUIP_ERR_CANT_EQUIP_EVER;
 
     if (proto->GetRequiredSkill() != 0)
@@ -12244,7 +12258,7 @@ InventoryResult Player::CanRollNeedForItem(ItemTemplate const* proto, Map const*
         return EQUIP_ERR_ITEM_NOT_FOUND;
 
    // Used by group, function GroupLoot, to know if a prototype can be used by a player
-    if ((proto->GetAllowableClass() & GetClassMask()) == 0 || !proto->GetAllowableRace().HasRace(GetRace()))
+    if ((proto->GetAllowableClass() & GetKnownClassMask()) == 0 || !proto->GetAllowableRace().HasRace(GetRace()))
         return EQUIP_ERR_CANT_EQUIP_EVER;
 
     if (proto->GetRequiredSpell() != 0 && !HasSpell(proto->GetRequiredSpell()))
@@ -12263,8 +12277,12 @@ InventoryResult Player::CanRollNeedForItem(ItemTemplate const* proto, Map const*
 
     if (proto->GetClass() == ITEM_CLASS_ARMOR && proto->GetInventoryType() != INVTYPE_CLOAK)
     {
-        ChrClassesEntry const* classesEntry = sChrClassesStore.AssertEntry(GetClass());
-        if (!(classesEntry->ArmorTypeMask & 1 << proto->GetSubClass()))
+        // the armor types of the real class and of every learned class stance (ClassStance.h)
+        uint32 armorTypeMask = 0;
+        for (ChrClassesEntry const* classesEntry : sChrClassesStore)
+            if (GetKnownClassMask() & (1u << (classesEntry->ID - 1)))
+                armorTypeMask |= classesEntry->ArmorTypeMask;
+        if (!(armorTypeMask & 1 << proto->GetSubClass()))
             return EQUIP_ERR_CLIENT_LOCKED_OUT;
     }
 
@@ -15018,7 +15036,7 @@ void Player::PrepareGossipMenu(WorldObject* source, uint32 menuId, bool showQues
                     if (!creature->CanTrainPlayerClass(this))
                         canTalk = false;
                     else if (Trainer::Trainer const* trainer = sObjectMgr->GetTrainer(trainerId))
-                        if (!(trainer->GetClassMask() & GetClassMask()))
+                        if (!(trainer->GetClassMask() & GetClassMask()) && !ClassStance::IsEnabled())
                             canTalk = false;
                     break;
                 }
@@ -15102,7 +15120,7 @@ void Player::PrepareGossipMenu(WorldObject* source, uint32 menuId, bool showQues
         };
 
         Trainer::Trainer const* ownTrainer = creature->GetTrainerId() ? sObjectMgr->GetTrainer(creature->GetTrainerId()) : nullptr;
-        if (creature->HasNpcFlag(UNIT_NPC_FLAG_TRAINER) && ownTrainer && (ownTrainer->GetClassMask() & GetClassMask())
+        if (creature->HasNpcFlag(UNIT_NPC_FLAG_TRAINER) && ownTrainer && ((ownTrainer->GetClassMask() & GetClassMask()) || ClassStance::IsEnabled())
             && creature->CanTrainPlayerClass(this) && !hasOption(GossipOptionNpc::Trainer))
             menu.AddMenuItem(CLASSIC_GOSSIP_OPTION_AUTO_TRAINER, menu.GetMenuItemCount(), GossipOptionNpc::Trainer, "Train me.", 0,
                 GossipOptionFlags::None, {}, 0, 0, false, 0, "", {}, {}, menuId, menu.GetMenuItemCount());
@@ -19892,6 +19910,13 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
     _LoadTalents(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_TALENTS));
     _LoadPvpTalents(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_PVP_TALENTS));
     _LoadSpells(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_SPELLS), holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_SPELL_FAVORITES));
+    // InitStatsForLevel above ran before the spells were known: the base mana of learned class stances (ClassStance.h)
+    // and the skills, loaded before the spells, taught only the real class's abilities: the stance classes' too now
+    if (ClassStance::GetLearnedClassMask(this))
+    {
+        UpdateClassStanceMana();
+        LearnClassStanceSkillSpells();
+    }
     GetSession()->GetCollectionMgr()->LoadCharacterData();
 
     LearnSpecializationSpells();
@@ -25008,7 +25033,7 @@ bool Player::BuyItemFromVendorSlot(ObjectGuid vendorguid, uint32 vendorslot, uin
         return false;
     }
 
-    if (!(pProto->GetAllowableClass() & GetClassMask()) && pProto->GetBonding() == BIND_ON_ACQUIRE && !IsGameMaster())
+    if (!(pProto->GetAllowableClass() & GetKnownClassMask()) && pProto->GetBonding() == BIND_ON_ACQUIRE && !IsGameMaster())
     {
         SendBuyError(BUY_ERR_CANT_FIND_ITEM, nullptr, vendorslot);
         return false;
@@ -26609,6 +26634,56 @@ void Player::LearnDefaultSkills()
     }
 }
 
+uint32 Player::GetKnownClassMask() const
+{
+    return GetClassMask() | ClassStance::GetLearnedClassMask(this);
+}
+
+uint32 Player::GetKnownClassesBaseMana(uint8 level) const
+{
+    uint32 basemana = 0;
+    sObjectMgr->GetPlayerClassLevelInfo(GetClass(), level, basemana);
+    if (uint32 learned = ClassStance::GetLearnedClassMask(this))
+    {
+        for (uint8 classId : ClassStance::Classes)
+        {
+            if (!(learned & (1u << (classId - 1))))
+                continue;
+            uint32 classMana = 0;
+            sObjectMgr->GetPlayerClassLevelInfo(classId, level, classMana);
+            basemana = std::max(basemana, classMana);
+        }
+    }
+    return basemana;
+}
+
+void Player::LearnClassStanceSkillSpells()
+{
+    std::vector<std::pair<uint32, uint32>> skills;          // LearnSkillRewardedSpells may add skills
+    for (auto const& [skillId, skillStatus] : mSkillStatus)
+        if (skillStatus.uState != SKILL_DELETED)
+            skills.emplace_back(skillId, GetSkillRankByPos(skillStatus.pos));
+    for (auto const& [skillId, skillValue] : skills)
+        LearnSkillRewardedSpells(skillId, skillValue, Races(GetRace()));
+}
+
+void Player::UpdateClassStanceMana()
+{
+    SetCreateMana(GetKnownClassesBaseMana(GetLevel()));
+    UpdateMaxPower(POWER_MANA);
+}
+
+void Player::SetClassStance(uint8 classId)
+{
+    if (m_classStance == classId)
+        return;
+
+    m_classStance = classId;
+    UpdateDisplayPower();
+    if (IsInWorld())
+        UpdateAllStats();
+}
+
 void Player::LearnDefaultSkill(SkillRaceClassInfoEntry const* rcInfo)
 {
     uint16 skillId = rcInfo->SkillID;
@@ -26725,7 +26800,9 @@ void Player::LearnQuestRewardedSpells()
 
 void Player::LearnSkillRewardedSpells(uint32 skillId, uint32 skillValue, Races race)
 {
-    uint32 classMask = GetClassMask();
+    // the real class and the classes of learned stances (ClassStance.h): a priest with Warrior Stance gets Heroic Strike from Arms
+    // and the Mail proficiency from Mail, as a warrior does
+    uint32 classMask = GetKnownClassMask();
     std::vector<SkillLineAbilityEntry const*> const* skillLineAbilities = sDB2Manager.GetSkillLineAbilitiesBySkill(skillId);
     if (!skillLineAbilities)
         return;
@@ -26759,7 +26836,9 @@ void Player::LearnSkillRewardedSpells(uint32 skillId, uint32 skillValue, Races r
         // Check race if set
         // Classic 1.60: Riding teaches every race's riding spell (Horse Riding, Mechanostrider Piloting... dummies under skill 762):
         // the mount items require that spell (ItemSparse.RequiredAbility), and any race may use any mount here (MountCapability hotfix)
-        if (!ability->RaceMask.IsEmpty() && !ability->RaceMask.HasRace(race) && skillId != SKILL_RIDING)
+        // Class stances: a stance class's ability ignores the race, as its skill line does (ClassStance::GetSkillRaceClassInfo)
+        bool const stanceAbility = ability->ClassMask && !(ability->ClassMask & GetClassMask());
+        if (!ability->RaceMask.IsEmpty() && !ability->RaceMask.HasRace(race) && skillId != SKILL_RIDING && !stanceAbility)
             continue;
 
         // Check class if set
@@ -27177,7 +27256,7 @@ Player* Player::GetTrader() const
 bool Player::IsSpellFitByClassAndRace(uint32 spell_id, uint32 learnSpellDepth /*= 0*/) const
 {
     uint8 race  = GetRace();
-    uint32 classmask = GetClassMask();
+    uint32 classmask = GetKnownClassMask();     // the real class and the classes of learned stances (ClassStance.h)
 
     SkillLineAbilityMapBounds bounds = sSpellMgr->GetSkillLineAbilityMapBounds(spell_id);
     if (bounds.first == bounds.second)
@@ -27205,7 +27284,7 @@ bool Player::IsSpellFitByClassAndRace(uint32 spell_id, uint32 learnSpellDepth /*
             continue;
 
         // skip wrong class and race skill saved in SkillRaceClassInfo.dbc
-        if (!sDB2Manager.GetSkillRaceClassInfo(_spell_idx->second->SkillLine, GetRace(), GetClass()))
+        if (!ClassStance::GetSkillRaceClassInfo(this, _spell_idx->second->SkillLine, GetRace()))
         {
             // Modern 12.0+ client DB2 dropped SkillRaceClassInfo entries
             // for the classic primary-profession skill lines (165 LW, 164
@@ -28692,7 +28771,7 @@ void Player::_LoadSkills(PreparedQueryResult result)
             uint16 max          = fields["max"].GetUInt16();
             int8 professionSlot = fields["professionSlot"].GetInt8();
 
-            SkillRaceClassInfoEntry const* rcEntry = sDB2Manager.GetSkillRaceClassInfo(skill, race, GetClass());
+            SkillRaceClassInfoEntry const* rcEntry = ClassStance::GetSkillRaceClassInfo(this, skill, race, true);
             if (!rcEntry)
             {
                 TC_LOG_ERROR("entities.player", "Player::_LoadSkills: Player '{}' ({}, Race: {}, Class: {}) has forbidden skill {} for his race/class combination",
@@ -28783,7 +28862,7 @@ void Player::_LoadSkills(PreparedQueryResult result)
         SkillLineEntry const* skillEntry = sSkillLineStore.LookupEntry(skillId);
         if (skillEntry->ParentSkillLineID && skillEntry->ParentTierIndex > 0 && !IsClassicProfessionChildSkill(skillEntry)
             && int32(GetSkillStep(skillEntry->ParentSkillLineID)) < skillEntry->ParentTierIndex)
-            if (SkillRaceClassInfoEntry const* rcEntry = sDB2Manager.GetSkillRaceClassInfo(skillEntry->ParentSkillLineID, GetRace(), GetClass()))
+            if (SkillRaceClassInfoEntry const* rcEntry = ClassStance::GetSkillRaceClassInfo(this, skillEntry->ParentSkillLineID, GetRace()))
                 if (SkillTiersEntry const* tier = sObjectMgr->GetSkillTier(rcEntry->SkillTierID))
                     SetSkill(skillEntry->ParentSkillLineID, skillEntry->ParentTierIndex, std::max<uint16>(GetPureSkillValue(skillEntry->ParentSkillLineID), 1), tier->GetValueForTierIndex(skillEntry->ParentTierIndex - 1));
 

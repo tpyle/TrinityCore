@@ -20,6 +20,7 @@ void AddClassicScripts();
 void AddSC_npc_profession_tutor();
 void AddSC_talentgrant_commandscript();
 void AddSC_bonusstats_commandscript();
+void AddSC_class_stance();
 
 // The name of this function should match:
 // void Add${NameOfDirectory}Scripts()
@@ -29,4 +30,5 @@ void AddCustomScripts()
     AddSC_npc_profession_tutor();
     AddSC_talentgrant_commandscript();
     AddSC_bonusstats_commandscript();
+    AddSC_class_stance();
 }

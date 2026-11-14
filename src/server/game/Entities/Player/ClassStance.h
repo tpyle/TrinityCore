@@ -1,0 +1,57 @@
+/*
+ * Class stances (Classic 1.60 realm custom): a player buys another class's stance from that class's trainer, then learns
+ * that class's spells there as their own class does. The stance (a stance bar aura, hotfix spells 8104019-8104027, custom-sql
+ * 071) makes the player fight as that class: its resource (every class has a slot for mana, rage, energy and combo points,
+ * 071), its attack power, crit, dodge, parry and regeneration formulas. The real class stays: talents, specialization, the
+ * talent window and what other players see. A learned stance also lets the player hold that class's skill lines and wear
+ * what that class wears, whether the stance is active or not.
+ */
+
+#ifndef TRINITY_CLASSSTANCE_H
+#define TRINITY_CLASSSTANCE_H
+
+#include "Define.h"
+#include <iterator>
+
+class Player;
+class SpellInfo;
+struct SkillRaceClassInfoEntry;
+enum SpellCastResult : int32;
+
+namespace ClassStance
+{
+    // the stance spells, one per class; custom-sql 071 and tools/class_stances.py write them in this order
+    constexpr uint32 FirstSpell = 8104019;
+    constexpr uint8 Classes[] = { 1, 2, 3, 4, 5, 7, 8, 9, 11 };    // warrior paladin hunter rogue priest shaman mage warlock druid
+    constexpr uint32 LastSpell = FirstSpell + std::size(Classes) - 1;
+
+    bool IsEnabled();
+    void LoadConfig();
+
+    // the class a stance spell stands for, 0 for any other spell
+    uint8 GetClassForSpell(uint32 spellId);
+    // the stance spell of a class, 0 for a class without one
+    uint32 GetSpellForClass(uint8 classId);
+
+    // the class mask of every class whose stance the player knows (the real class not included)
+    uint32 GetLearnedClassMask(Player const* player);
+
+    // the SkillRaceClassInfo entry that lets the player hold a skill: the real class's (race and class), else that of a learned
+    // stance's class. For a stance class a class, armor or weapon skill line ignores the race: a human may learn the shaman's
+    // lines without being a race the shaman's data names. Every stance class counts when anyStance (skills load before spells).
+    SkillRaceClassInfoEntry const* GetSkillRaceClassInfo(Player const* player, uint32 skill, uint8 race, bool anyStance = false);
+
+    // the class a spell belongs to by its spell family (ChrClasses.SpellClassSet), 0 for a spell of no class
+    uint8 GetClassOfSpell(SpellInfo const* spellInfo);
+
+    // a player who has learned a class stance casts a class's abilities only while fighting as that class: the real class's
+    // with no class stance active, a stance class's in its stance. Spells of classes the player has no stance for (item and
+    // proc spells) are not checked. With notify, a refusal tells the player which stance to take or leave (the client has no
+    // error text for a class stance) and is not reported further.
+    SpellCastResult CheckClassSpell(Player const* player, SpellInfo const* spellInfo, bool notify);
+
+    // the stance class's skill lines and its armor and weapon skills, as a new character of that class gets them
+    void LearnClassSkills(Player* player, uint8 classId);
+}
+
+#endif

@@ -16,6 +16,7 @@
  */
 
 #include "Creature.h"
+#include "ClassStance.h"
 #include "BattlegroundMgr.h"
 #include "BotGroupRules.h"
 #include "CellImpl.h"
@@ -1373,6 +1374,9 @@ bool Creature::CanResetTalents(Player* player) const
 bool Creature::CanTrainPlayerClass(Player const* player) const
 {
     uint32 trainerClass = GetCreatureTemplate()->trainer_class;
+    // class stances (ClassStance.h): a class trainer sells its stance to every other class, and trains those who know it
+    if (trainerClass && ClassStance::IsEnabled() && ClassStance::GetSpellForClass(trainerClass))
+        return true;
     return !trainerClass || player->GetClass() == trainerClass;
 }
 

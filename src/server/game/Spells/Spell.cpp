@@ -26,6 +26,7 @@
 #include "CharmInfo.h"
 #include "ClassicAutoShot.h"
 #include "ClassicOpcodes.h"
+#include "ClassStance.h"
 #include "CollectionMgr.h"
 #include "CombatLogPackets.h"
 #include "Common.h"
@@ -6012,6 +6013,12 @@ SpellCastResult Spell::CheckCast(bool strict, int32* param1 /*= nullptr*/, int32
         if (m_targets.GetGOTarget()->GetGOInfo()->GetNoDamageImmune() && m_caster->ToUnit()->HasUnitFlag(UNIT_FLAG_IMMUNE))
             return SPELL_FAILED_DONT_REPORT;
     }
+
+    // class stances (ClassStance.h): a class's abilities only while fighting as that class
+    if (Player const* playerCaster = m_caster->ToPlayer())
+        if (!m_spellInfo->IsPassive() && !IsTriggered() && !m_CastItem)
+            if (SpellCastResult result = ClassStance::CheckClassSpell(playerCaster, m_spellInfo, m_fromClient); result != SPELL_CAST_OK)
+                return result;
 
     // check cooldowns to prevent cheating
     if (!m_spellInfo->IsPassive())

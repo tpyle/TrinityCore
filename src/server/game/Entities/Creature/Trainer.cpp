@@ -16,6 +16,7 @@
  */
 
 #include "Trainer.h"
+#include "ClassStance.h"
 #include "BattlePetMgr.h"
 #include "Chat.h"
 #include "ConditionMgr.h"
@@ -129,6 +130,10 @@ namespace Trainer
             if (!player->IsSpellFitByClassAndRace(trainerSpell.SpellId))
                 continue;
 
+            // a class stance (ClassStance.h) is for the other classes
+            if (ClassStance::GetClassForSpell(trainerSpell.SpellId) == player->GetClass() || (ClassStance::GetClassForSpell(trainerSpell.SpellId) && !ClassStance::IsEnabled()))
+                continue;
+
             if (!sConditionMgr->IsObjectMeetingTrainerSpellConditions(_id, trainerSpell.SpellId, player))
             {
                 TC_LOG_DEBUG("condition", "SendSpells: conditions not met for trainer id {} spell {} player '{}' ({})", _id, trainerSpell.SpellId, player->GetName(), player->GetGUID().ToString());
@@ -218,6 +223,10 @@ namespace Trainer
             }
 
             player->LearnSpell(trainerSpell->SpellId, dependent);
+
+            // a bought class stance (ClassStance.h) opens the trainer's class spells: show them without reopening the window
+            if (ClassStance::GetClassForSpell(trainerSpell->SpellId))
+                SendSpells(npc, player, player->GetSession()->GetSessionDbLocaleIndex());
         }
     }
 
@@ -416,7 +425,14 @@ namespace Trainer
         // A class trainer teaches its own class only. A spell of a shared skill line passes the class check for other classes too:
         // Dual Wield (674) is fit for a shaman by the client's data, so a shaman learned it at the warrior trainer (Azeldof, 2026-11-01).
         // A trainer without class spells (weapon masters, professions) has every class in its mask.
-        if (!(GetClassMask() & player->GetClassMask()))
+        // Class stances (ClassStance.h): the trainer's stance is for every other class, and its class's spells are for those who
+        // have learned it.
+        if (uint8 stanceClass = ClassStance::GetClassForSpell(trainerSpell->SpellId))
+        {
+            if (!ClassStance::IsEnabled() || stanceClass == player->GetClass())
+                return SpellState::Unavailable;
+        }
+        else if (!(GetClassMask() & player->GetKnownClassMask()))
             return SpellState::Unavailable;
 
         // check race/class requirement

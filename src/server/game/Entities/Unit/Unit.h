@@ -781,6 +781,8 @@ class TC_GAME_API Unit : public WorldObject
         uint8 GetClass() const { return m_unitData->ClassId; }
         void SetClass(uint8 classId) { SetUpdateFieldValue(m_values.ModifyValue(&Unit::m_unitData).ModifyValue(&UF::UnitData::ClassId), classId); }
         uint32 GetClassMask() const { return 1 << (GetClass()-1); }
+        // the class a player fights as (an active class stance's, ClassStance.h); any other unit's own class
+        uint8 GetCombatClass() const;
         Gender GetGender() const { return Gender(*m_unitData->Sex); }
         void SetGender(Gender gender) { SetUpdateFieldValue(m_values.ModifyValue(&Unit::m_unitData).ModifyValue(&UF::UnitData::Sex), gender); }
         virtual Gender GetNativeGender() const { return GetGender(); }

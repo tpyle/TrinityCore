@@ -1617,7 +1617,7 @@ void Spell::EffectEnergize()
     Powers power = Powers(effectInfo->MiscValue);
 
     // Diagnostic with the SetPower log in Unit.cpp: which energize spell, called from which aura, gives a warrior a combo point.
-    if (power == POWER_COMBO_POINTS && unitCaster->GetClass() == CLASS_WARRIOR && unitCaster->IsPlayer())
+    if (power == POWER_COMBO_POINTS && unitCaster->GetCombatClass() == CLASS_WARRIOR && unitCaster->IsPlayer())
     {
         static std::atomic<uint32> loggedWarriorComboEnergize{ 0 };
         if (loggedWarriorComboEnergize.fetch_add(1) < 60)
@@ -1689,7 +1689,7 @@ void Spell::EffectEnergize()
     // Classic 1.60: a warrior's combo point is the Overpower window. It comes from 1282733 "Overpower" (after a dodge, or the Bloodthrill talent),
     // whose own aura lasts 5 s; the point is cleared when that time is up (Unit::UpdateReactives). The window used to start only on a dodge and
     // last 4 s, so the button went dark a second early, and a Bloodthrill point never went away.
-    if (power == POWER_COMBO_POINTS && unitTarget == unitCaster && unitCaster->GetClass() == CLASS_WARRIOR && unitCaster->IsPlayer())
+    if (power == POWER_COMBO_POINTS && unitTarget == unitCaster && unitCaster->GetCombatClass() == CLASS_WARRIOR && unitCaster->IsPlayer())
     {
         int32 const window = m_spellInfo->GetDuration();
         unitCaster->StartReactiveTimer(REACTIVE_OVERPOWER, window > 0 ? uint32(window) : 5000u);

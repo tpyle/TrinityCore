@@ -21,6 +21,7 @@
 
 #include "World.h"
 #include "WorldScale.h"
+#include "ClassStance.h"
 #include "BonusLoot.h"
 #include "DeathRecap.h"
 #include "AccountMgr.h"
@@ -1316,6 +1317,7 @@ void World::LoadConfigSettings(bool reload)
 
     // Classic 1.60: world scaling (a reload applies to creatures as they next spawn or respawn)
     WorldScale::LoadConfig();
+    ClassStance::LoadConfig();
 
     // Classic 1.60: bonus loot Tomes (BonusLoot.h)
     BonusLoot::LoadConfig();
