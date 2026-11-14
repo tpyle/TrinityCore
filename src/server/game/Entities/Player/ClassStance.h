@@ -11,7 +11,9 @@
 #define TRINITY_CLASSSTANCE_H
 
 #include "Define.h"
+#include "ObjectGuid.h"
 #include <iterator>
+#include <string>
 
 class Player;
 class SpellInfo;
@@ -52,6 +54,29 @@ namespace ClassStance
 
     // the stance class's skill lines and its armor and weapon skills, as a new character of that class gets them
     void LearnClassSkills(Player* player, uint8 classId);
+
+    // Stance talents (the ForeverStances addon draws the trees, custom-sql 073 keeps the picks): every learned stance class has
+    // its own pool of talent points, as many as the real class owns (levels, Rate.Talent, granted points and Tomes of Talent),
+    // spent by the Classic rules (5 points in the tree a tier, prerequisites). A talent is its rank 1 spell with the rank as a trait, as the real class's talents are. They are
+    // active at all times, or with ClassStance.TalentsAlwaysActive = 0 only while their class's stance is.
+    bool TalentsAlwaysActive();
+    uint32 GetTalentPoints(Player const* player, uint8 classId);
+    uint32 GetSpentTalentPoints(Player const* player, uint8 classId);
+    // "" when learned, else why not
+    std::string LearnTalent(Player* player, uint8 classId, uint32 talentId);
+    void ResetTalents(Player* player, uint8 classId);
+    // login: read the picks and apply those that are active
+    void LoadTalents(Player* player);
+    void DeleteTalents(ObjectGuid guid);
+    // a class stance began or ended (Player::SetClassStance)
+    void OnStanceChanged(Player* player, uint8 oldClass);
+
+    // the addon's messages (prefix AddonPrefix, whispers the player sends to themselves) and the server's answers
+    constexpr char AddonPrefix[] = "FSTANCE";
+    void HandleAddonMessage(Player* player, std::string const& text);
+    void SendState(Player* player);
+    void SendTalents(Player* player, uint8 classId);
+    void SendSkills(Player* player);
 }
 
 #endif

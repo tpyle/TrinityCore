@@ -9,6 +9,7 @@
 #include "Player.h"
 #include "SpellAuraEffects.h"
 #include "SpellScript.h"
+#include "SharedDefines.h"
 
 class spell_class_stance : public SpellScript
 {
@@ -69,7 +70,38 @@ class spell_class_stance_aura : public AuraScript
     }
 };
 
+// the stance talents (ClassStance::LoadTalents) and the ForeverStances addon's messages
+class class_stance_playerscript : public PlayerScript
+{
+public:
+    class_stance_playerscript() : PlayerScript("class_stance_playerscript") { }
+
+    void OnLogin(Player* player, bool /*firstLogin*/) override
+    {
+        ClassStance::LoadTalents(player);
+    }
+
+    void OnDelete(ObjectGuid guid, uint32 /*accountId*/) override
+    {
+        ClassStance::DeleteTalents(guid);
+    }
+
+    void OnLevelChanged(Player* player, uint8 /*oldLevel*/) override
+    {
+        if (ClassStance::GetLearnedClassMask(player))
+            ClassStance::SendState(player);
+    }
+
+    // a whisper to themselves (the addon's requests); nothing reaches another player
+    void OnAddonMessageSent(Player* player, uint32 type, std::string const& prefix, std::string const& text, Player* receiver) override
+    {
+        if (type == CHAT_MSG_WHISPER && receiver == player && prefix == ClassStance::AddonPrefix && ClassStance::IsEnabled())
+            ClassStance::HandleAddonMessage(player, text);
+    }
+};
+
 void AddSC_class_stance()
 {
     RegisterSpellAndAuraScriptPair(spell_class_stance, spell_class_stance_aura);
+    new class_stance_playerscript();
 }

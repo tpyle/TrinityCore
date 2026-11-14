@@ -3522,6 +3522,8 @@ void Player::LearnSpell(uint32 spell_id, bool dependent, int32 fromSkill /*= 0*/
             ClassStance::LearnClassSkills(this, stanceClass);
             LearnClassStanceSkillSpells();      // a skill held already (Mail, Shield) teaches the new class's abilities too
             UpdateClassStanceMana();
+            if (IsInWorld())
+                ClassStance::SendState(this);   // the ForeverStances addon
         }
 
     // prevent duplicated entires in spell book, also not send if not in world (loading)
@@ -26678,10 +26680,12 @@ void Player::SetClassStance(uint8 classId)
     if (m_classStance == classId)
         return;
 
+    uint8 const oldClass = m_classStance;
     m_classStance = classId;
     UpdateDisplayPower();
     if (IsInWorld())
         UpdateAllStats();
+    ClassStance::OnStanceChanged(this, oldClass);
 }
 
 void Player::LearnDefaultSkill(SkillRaceClassInfoEntry const* rcInfo)

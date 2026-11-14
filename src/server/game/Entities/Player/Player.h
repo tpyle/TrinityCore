@@ -2022,6 +2022,9 @@ class TC_GAME_API Player final : public Unit, public GridObject<Player>
         uint8 GetEffectiveClass() const { return m_classStance ? m_classStance : GetClass(); }
         uint8 GetClassStance() const { return m_classStance; }
         void SetClassStance(uint8 classId);
+        // ClassStance.h: the stance classes' talents, talent ID to rank
+        std::unordered_map<uint32, uint8>& GetClassStanceTalents() { return m_classStanceTalents; }
+        std::unordered_map<uint32, uint8> const& GetClassStanceTalents() const { return m_classStanceTalents; }
         uint32 GetKnownClassMask() const;
         uint32 GetKnownClassesBaseMana(uint8 level) const;
         void UpdateClassStanceMana();
@@ -2358,6 +2361,7 @@ class TC_GAME_API Player final : public Unit, public GridObject<Player>
         WorldSession* GetSession() const { return m_session; }
 
     protected:
+        std::unordered_map<uint32, uint8> m_classStanceTalents;
         uint8 m_classStance = 0;                            // ClassStance.h: the active stance's class, 0 for none
 
         UF::UpdateFieldFlag GetUpdateFieldFlagsFor(Player const* target) const override;
