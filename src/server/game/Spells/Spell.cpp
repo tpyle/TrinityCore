@@ -31,6 +31,7 @@
 #include "CombatLogPackets.h"
 #include "Common.h"
 #include "ConditionMgr.h"
+#include "Config.h"
 #include "Containers.h"
 #include "CreatureAI.h"
 #include "DB2Stores.h"
@@ -7890,6 +7891,11 @@ SpellCastResult Spell::CheckItems(int32* param1 /*= nullptr*/, int32* param2 /*=
         // check reagents (ignore triggered spells with reagents processed by original spell) and special reagent ignore case.
         if (checkReagents)
         {
+            // Crafting.ReagentsFromBank: a recipe also counts the reagents in the character's bank (the bank tab and bank bags,
+            // anywhere in the world, as retail's crafting from the bank); TakeReagents already takes them from there after the
+            // bags. Class spell reagents (Soul Shard, Symbol of Kings) still have to be carried.
+            bool const reagentsFromBank = m_spellInfo->HasAttribute(SPELL_ATTR0_IS_TRADESKILL)
+                && sConfigMgr->GetBoolDefault("Crafting.ReagentsFromBank", true);
             for (uint32 i = 0; i < MAX_SPELL_REAGENTS; i++)
             {
                 if (m_spellInfo->Reagent[i] <= 0)
@@ -7916,7 +7922,7 @@ SpellCastResult Spell::CheckItems(int32* param1 /*= nullptr*/, int32* param2 /*=
                         }
                     }
                 }
-                if (!player->HasItemCount(itemid, itemcount))
+                if (!player->HasItemCount(itemid, itemcount, reagentsFromBank))
                 {
                     if (param1)
                         *param1 = itemid;
