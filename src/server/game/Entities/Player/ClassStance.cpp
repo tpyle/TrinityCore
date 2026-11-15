@@ -18,6 +18,7 @@
 #include "UpdateFields.h"
 #include "Util.h"
 #include "WorldSession.h"
+#include <unordered_set>
 
 namespace ClassStance
 {
@@ -28,6 +29,7 @@ namespace ClassStance
         bool talentsAlwaysActive = true;
         bool allowInCombat = false;
         bool sharedTalentPoints = false;
+        std::unordered_set<uint32> anyStanceSpells;    // ClassStance.AnyStanceSpells: cast in any stance or none
 
         bool IsStanceSkillCategory(uint32 skill)
         {
@@ -54,6 +56,11 @@ namespace ClassStance
         talentsAlwaysActive = sConfigMgr->GetBoolDefault("ClassStance.TalentsAlwaysActive", true);
         allowInCombat = sConfigMgr->GetBoolDefault("ClassStance.AllowInCombat", false);
         sharedTalentPoints = sConfigMgr->GetBoolDefault("ClassStance.SharedTalentPoints", false);
+        anyStanceSpells.clear();
+        std::string const anyStanceList = sConfigMgr->GetStringDefault("ClassStance.AnyStanceSpells", "75");
+        for (std::string_view token : Trinity::Tokenize(anyStanceList, ' ', false))
+            if (Optional<uint32> spellId = Trinity::StringTo<uint32>(token))
+                anyStanceSpells.insert(*spellId);
         TC_LOG_INFO("server.loading", "Class stances: {} (spells {}-{}), talents {}, {} talent points, {}", enabled ? "enabled" : "disabled",
             FirstSpell, LastSpell, talentsAlwaysActive ? "always active" : "active in their stance", sharedTalentPoints ? "shared" : "separate",
             allowInCombat ? "changed in combat too" : "changed out of combat only");
@@ -135,7 +142,7 @@ namespace ClassStance
             return SPELL_CAST_OK;
 
         uint8 const spellClass = GetClassOfSpell(spellInfo);
-        if (!spellClass || spellClass == player->GetEffectiveClass())
+        if (!spellClass || spellClass == player->GetEffectiveClass() || anyStanceSpells.contains(spellInfo->Id))
             return SPELL_CAST_OK;
 
         uint8 stanceClass;
