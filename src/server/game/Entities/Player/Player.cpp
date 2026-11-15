@@ -31419,6 +31419,26 @@ void Player::UpdateStablePetLoyalty(uint32 petNumber, uint8 loyaltyLevel, int32 
     SetUpdateFieldValue(petSetter.ModifyValue(&UF::StablePetInfo::LoyaltyPoints), uint32(std::max(loyaltyPoints, 0)));
 }
 
+void Player::UpdateStablePetHappiness(uint32 petNumber, uint32 happiness)
+{
+    if (m_petStable)
+        if (PetStable::PetInfo* currentPet = m_petStable->GetCurrentPet())
+            if (currentPet->PetNumber == petNumber)
+                currentPet->Mana = happiness;
+
+    if (!m_activePlayerData->PetStable.has_value())
+        return;
+
+    int32 ufIndex = m_activePlayerData->PetStable->Pets.FindIndexIf([petNumber](UF::StablePetInfo const& p) { return p.PetNumber == petNumber; });
+    if (ufIndex < 0)
+        return;
+
+    SetUpdateFieldValue(m_values.ModifyValue(&Player::m_activePlayerData)
+        .ModifyValue(&UF::ActivePlayerData::PetStable, 0)
+        .ModifyValue(&UF::StableInfo::Pets, ufIndex)
+        .ModifyValue(&UF::StablePetInfo::Happiness), happiness);
+}
+
 void Player::SetNumStableSlots(uint8 slots)
 {
     SetUpdateFieldValue(m_values.ModifyValue(&Player::m_activePlayerData).ModifyValue(&UF::ActivePlayerData::NumStableSlots), slots);

@@ -751,6 +751,11 @@ void Pet::Update(uint32 diff)
                     }
                     if (!ModifyLoyalty(change))
                         return;                             // ran away, removed
+
+                    // the stable window shows the happiness it was given when the pet was loaded (a non-hunter with Hunter
+                    // Stance sees it nowhere else: the client hides the pet frame's happiness from them); keep it current
+                    if (Player* owner = GetOwner())
+                        owner->UpdateStablePetHappiness(m_charmInfo->GetPetNumber(), uint32(GetPower(POWER_HAPPINESS)));
                 }
             }
 

@@ -1371,6 +1371,7 @@ class TC_GAME_API Player final : public Unit, public GridObject<Player>
         PetStable const* GetPetStable() const { return m_petStable.get(); }
         void AddPetToUpdateFields(PetStable::PetInfo const& pet, PetSaveMode slot, PetStableFlags flags);
         void UpdateStablePetLoyalty(uint32 petNumber, uint8 loyaltyLevel, int32 loyaltyPoints);   // Classic 1.60 hunter pet loyalty
+        void UpdateStablePetHappiness(uint32 petNumber, uint32 happiness);   // Classic 1.60: the stable window's happiness of the summoned pet
         void SetPetSlot(uint32 petNumber, PetSaveMode dstPetSlot);
         uint8 GetNumStableSlots() const { return m_activePlayerData->NumStableSlots; }
         void SetNumStableSlots(uint8 slots);
