@@ -3523,7 +3523,10 @@ void Player::LearnSpell(uint32 spell_id, bool dependent, int32 fromSkill /*= 0*/
             LearnClassStanceSkillSpells();      // a skill held already (Mail, Shield) teaches the new class's abilities too
             UpdateClassStanceMana();
             if (IsInWorld())
+            {
+                ClassStance::SyncTraitConfigs(this);     // its talents in the client's own window
                 ClassStance::SendState(this);   // the ForeverStances addon
+            }
         }
 
     // prevent duplicated entires in spell book, also not send if not in world (loading)
@@ -30878,6 +30881,27 @@ void Player::CreateTraitConfig(WorldPackets::Traits::TraitConfig& traitConfig)
     }
 
     m_traitConfigStates[configId] = PLAYERSPELL_CHANGED;
+}
+
+void Player::SetClassStanceTraitConfig(WorldPackets::Traits::TraitConfig const& traitConfig)
+{
+    if (!m_activePlayerData->TraitConfigs.Get(traitConfig.ID))
+    {
+        AddTraitConfig(traitConfig);
+        return;
+    }
+
+    auto entries = m_values.ModifyValue(&Player::m_activePlayerData).ModifyValue(&UF::ActivePlayerData::TraitConfigs, traitConfig.ID)
+        .ModifyValue(&UF::TraitConfig::Entries);
+    ClearDynamicUpdateFieldValues(entries);
+    for (WorldPackets::Traits::TraitEntry const& traitEntry : traitConfig.Entries)
+    {
+        UF::TraitEntry& newEntry = AddDynamicUpdateFieldValue(entries);
+        newEntry.TraitNodeID = traitEntry.TraitNodeID;
+        newEntry.TraitNodeEntryID = traitEntry.TraitNodeEntryID;
+        newEntry.Rank = traitEntry.Rank;
+        newEntry.GrantedRanks = traitEntry.GrantedRanks;
+    }
 }
 
 void Player::AddTraitConfig(WorldPackets::Traits::TraitConfig const& traitConfig)

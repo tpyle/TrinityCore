@@ -217,6 +217,7 @@ namespace ClassStance
         struct TalentNode
         {
             uint8 ClassId = 0;
+            uint32 Node = 0;            // TraitNode (the client's talent window: stance trait configs)
             uint32 Definition = 0;      // TraitDefinition: learned as Spell with the rank as a trait
             uint32 Spell = 0;
             uint8 Tab = 0;
@@ -303,7 +304,7 @@ namespace ClassStance
     void LoadTalentNodes()
     {
         talentNodes.clear();
-        QueryResult result = WorldDatabase.Query("SELECT entry, class, definition, spell, tab, need, max_ranks, prereq1, prereq2, prereq3 FROM class_stance_talent");
+        QueryResult result = WorldDatabase.Query("SELECT entry, class, definition, spell, tab, need, max_ranks, prereq1, prereq2, prereq3, node FROM class_stance_talent");
         if (!result)
         {
             TC_LOG_ERROR("server.loading", "Class stances: no talents in world.class_stance_talent (custom-sql 075)");
@@ -320,6 +321,7 @@ namespace ClassStance
             node.Need = fields[5].GetUInt8();
             node.MaxRanks = fields[6].GetUInt8();
             node.Prereqs = { fields[7].GetUInt32(), fields[8].GetUInt32(), fields[9].GetUInt32() };
+            node.Node = fields[10].GetUInt32();
             if (!sSpellMgr->GetSpellInfo(node.Spell, DIFFICULTY_NONE))
                 TC_LOG_ERROR("server.loading", "Class stances: talent {} learns spell {}, which does not exist", fields[0].GetUInt32(), node.Spell);
         } while (result->NextRow());
@@ -506,6 +508,8 @@ namespace ClassStance
         for (uint8 classId : Classes)
             if (IsTalentActive(player, classId))
                 ApplyClassTalents(player, classId, true, true);
+
+        SyncTraitConfigs(player);
     }
 
     void DeleteTalents(ObjectGuid guid)
@@ -542,6 +546,112 @@ namespace ClassStance
             first = false;
         }
         SendAddon(player, message);
+    }
+
+    int32 GetTraitConfigId(uint8 classId)
+    {
+        return TraitConfigIdBase + classId;
+    }
+
+    uint8 GetClassOfTraitConfig(int32 configId)
+    {
+        if (configId <= TraitConfigIdBase || configId > TraitConfigIdBase + MAX_CLASSES)
+            return 0;
+        uint8 const classId = uint8(configId - TraitConfigIdBase);
+        return std::ranges::find(Classes, classId) != std::end(Classes) ? classId : 0;
+    }
+
+    void SyncTraitConfigs(Player* player)
+    {
+        uint32 const learned = GetLearnedClassMask(player);
+        for (uint8 classId : Classes)
+        {
+            if (!(learned & (1u << (classId - 1))))
+                continue;
+            ChrSpecializationEntry const* spec = sDB2Manager.GetChrSpecializationByIndex(classId, 0);
+            if (!spec)
+                continue;
+
+            WorldPackets::Traits::TraitConfig config;
+            config.ID = GetTraitConfigId(classId);
+            config.Type = TraitConfigType::Combat;
+            config.ChrSpecializationID = spec->ID;
+            // ActiveForSpec of a spec not the player's: every lookup of the player's own configs goes by their spec and skips it;
+            // a config not flagged so would count as a saved loadout (action bars, the loadout limit)
+            config.CombatConfigFlags = TraitCombatConfigFlags::ActiveForSpec;
+            config.LocalIdentifier = 1;
+            config.Name = fmt::format("{} Stance", spec->Name[LOCALE_enUS]);
+            for (auto const& [entry, rank] : player->GetClassStanceTalents())
+            {
+                TalentNode const* node = GetNode(entry);
+                if (!node || node->ClassId != classId || !node->Node || !rank)
+                    continue;
+                WorldPackets::Traits::TraitEntry& traitEntry = config.Entries.emplace_back();
+                traitEntry.TraitNodeID = node->Node;
+                traitEntry.TraitNodeEntryID = entry;
+                traitEntry.Rank = rank;
+            }
+            player->SetClassStanceTraitConfig(config);
+        }
+    }
+
+    std::string CommitTraitConfig(Player* player, int32 configId, std::vector<WorldPackets::Traits::TraitEntry> const& entries)
+    {
+        uint8 const classId = GetClassOfTraitConfig(configId);
+        if (!classId)
+            return "Unknown talent config.";
+
+        // the ranks asked for, by node entry; entries not sent keep their rank
+        auto const& talents = player->GetClassStanceTalents();
+        std::map<uint32, uint8> wanted;
+        bool lowered = false;
+        for (WorldPackets::Traits::TraitEntry const& entry : entries)
+        {
+            TalentNode const* node = GetNode(entry.TraitNodeEntryID);
+            if (!node || node->ClassId != classId)
+                continue;
+            auto itr = talents.find(entry.TraitNodeEntryID);
+            uint8 const have = itr != talents.end() ? itr->second : 0;
+            if (entry.Rank < have)
+                lowered = true;
+            else if (entry.Rank > have)
+                wanted[entry.TraitNodeEntryID] = uint8(std::min<int32>(entry.Rank, node->MaxRanks));
+        }
+
+        std::string error;
+        if (lowered)
+            error = "Stance talents are only given back all at once: use Reset talents.";
+        else
+        {
+            // one rank at a time, as long as any can be learned: the client sends the whole change, in no order of the tree's rules
+            bool progress = true;
+            while (progress && !wanted.empty())
+            {
+                progress = false;
+                for (auto itr = wanted.begin(); itr != wanted.end();)
+                {
+                    auto have = talents.find(itr->first);
+                    if (have != talents.end() && have->second >= itr->second)
+                    {
+                        itr = wanted.erase(itr);
+                        continue;
+                    }
+                    std::string result = LearnTalent(player, classId, itr->first);
+                    if (result.empty())
+                        progress = true;
+                    else
+                        error = result;
+                    ++itr;
+                }
+            }
+            if (wanted.empty())
+                error.clear();
+        }
+
+        SyncTraitConfigs(player);
+        SendTalents(player, classId);
+        SendState(player);
+        return error;
     }
 
     void SendTalents(Player* player, uint8 classId)
@@ -630,6 +740,7 @@ namespace ClassStance
             std::string error = LearnTalent(player, classId, number(2));
             if (!error.empty())
                 SendAddon(player, "ERR " + error);
+            SyncTraitConfigs(player);
             SendTalents(player, classId);
             SendState(player);
         }
@@ -640,6 +751,7 @@ namespace ClassStance
                 SendAddon(player, "ERR Not in combat.");
             else if (GetLearnedClassMask(player) & (1u << (classId - 1)))
                 ResetTalents(player, classId);
+            SyncTraitConfigs(player);
             SendTalents(player, classId);
             SendState(player);
         }

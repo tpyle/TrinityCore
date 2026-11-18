@@ -19,6 +19,7 @@
 class Player;
 class SpellInfo;
 struct SkillRaceClassInfoEntry;
+namespace WorldPackets::Traits { struct TraitConfig; struct TraitEntry; }
 enum SpellCastResult : int32;
 
 namespace ClassStance
@@ -81,6 +82,16 @@ namespace ClassStance
     uint32 GetSpentTalentPoints(Player const* player, uint8 classId);
     // "" when learned, else why not
     std::string LearnTalent(Player* player, uint8 classId, uint32 talentId);
+
+    // The client's own talent window for a stance class (prototype): every learned stance class has a trait config of its spec,
+    // id TraitConfigIdBase + class, holding the stance picks; never saved (rebuilt from the picks at login and after each change).
+    // A commit of one goes through the stance rules instead of TraitMgr's.
+    constexpr int32 TraitConfigIdBase = 2130000000;
+    int32 GetTraitConfigId(uint8 classId);
+    uint8 GetClassOfTraitConfig(int32 configId);             // 0 for a config that is not a stance's
+    void SyncTraitConfigs(Player* player);
+    // "" when every rank asked for was learned, else why not (the configs are sent again either way)
+    std::string CommitTraitConfig(Player* player, int32 configId, std::vector<WorldPackets::Traits::TraitEntry> const& entries);
     void ResetTalents(Player* player, uint8 classId);
     // login: read the picks and apply those that are active
     void LoadTalents(Player* player);

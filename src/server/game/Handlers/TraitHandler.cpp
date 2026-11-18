@@ -48,6 +48,18 @@ void WorldSession::HandleTraitsCommitConfig(WorldPackets::Traits::TraitsCommitCo
         return;
     }
 
+    // a stance class's talents in the client's own window (ClassStance::SyncTraitConfigs): learned by the stance rules
+    if (ClassStance::GetClassOfTraitConfig(configId))
+    {
+        std::string error = ClassStance::CommitTraitConfig(_player, configId, traitsCommitConfig.Config.Entries);
+        if (!error.empty())
+        {
+            ChatHandler(this).SendSysMessage(error);
+            SendPacket(WorldPackets::Traits::TraitConfigCommitFailed(configId, 0, AsUnderlyingType(TraitMgr::LearnResult::CantDoThatRightNow)).Write());
+        }
+        return;
+    }
+
     auto findEntry = [](WorldPackets::Traits::TraitConfig& config, int32 traitNodeId, int32 traitNodeEntryId) -> WorldPackets::Traits::TraitEntry*
     {
         auto entryItr = std::ranges::find_if(config.Entries, [=](WorldPackets::Traits::TraitEntry const& traitEntry)

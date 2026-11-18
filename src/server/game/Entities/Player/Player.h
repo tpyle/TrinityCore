@@ -2115,6 +2115,7 @@ class TC_GAME_API Player final : public Unit, public GridObject<Player>
         // Traits
         void CreateTraitConfig(WorldPackets::Traits::TraitConfig& traitConfig);
         void AddTraitConfig(WorldPackets::Traits::TraitConfig const& traitConfig);
+        void SetClassStanceTraitConfig(WorldPackets::Traits::TraitConfig const& traitConfig);   // ClassStance::SyncTraitConfigs: added or its entries replaced, never saved
         UF::TraitConfig const* GetTraitConfig(int32 configId) const;
         void UpdateTraitConfig(WorldPackets::Traits::TraitConfig&& newConfig, int32 savedConfigId, bool withCastTime);
         void ApplyTraitEntryChanges(int32 editedConfigId, WorldPackets::Traits::TraitConfig const& newConfig, bool applyTraits, bool consumeCurrencies);
