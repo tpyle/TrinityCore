@@ -215,21 +215,22 @@ namespace ClassStance
                 && (talentsAlwaysActive || player->GetClassStance() == classId);
         }
 
-        void ApplyTalent(Player* player, TalentNode const& node, uint8 rank, bool apply)
+        // quiet: no "You have learned/unlearned" message (talents put back at login or on a stance change, not newly picked)
+        void ApplyTalent(Player* player, TalentNode const& node, uint8 rank, bool apply, bool quiet)
         {
             if (!node.Spell)
                 return;
             if (apply && rank)
-                player->LearnSpell(node.Spell, true, 0, false, PlayerSpellTrait{ .DefinitionId = int32(node.Definition), .Rank = rank });
+                player->LearnSpell(node.Spell, true, 0, quiet, PlayerSpellTrait{ .DefinitionId = int32(node.Definition), .Rank = rank });
             else
-                player->RemoveSpell(node.Spell, false, false);
+                player->RemoveSpell(node.Spell, false, false, quiet);
         }
 
-        void ApplyClassTalents(Player* player, uint8 classId, bool apply)
+        void ApplyClassTalents(Player* player, uint8 classId, bool apply, bool quiet)
         {
             for (auto const& [entry, rank] : player->GetClassStanceTalents())
                 if (TalentNode const* node = GetNode(entry); node && node->ClassId == classId)
-                    ApplyTalent(player, *node, rank, apply);
+                    ApplyTalent(player, *node, rank, apply, quiet);
         }
 
         uint32 GetSpentInTab(Player const* player, uint8 classId, uint8 tab)
@@ -426,8 +427,8 @@ namespace ClassStance
             // off and on again: learning a known spell with a new rank only relinks the trait, and a passive aura (Divine Intellect)
             // kept its first rank's amount
             if (rank)
-                ApplyTalent(player, *node, rank, false);
-            ApplyTalent(player, *node, rank + 1, true);
+                ApplyTalent(player, *node, rank, false, true);
+            ApplyTalent(player, *node, rank + 1, true, false);
         }
         return "";
     }
@@ -435,7 +436,7 @@ namespace ClassStance
     void ResetTalents(Player* player, uint8 classId)
     {
         if (IsTalentActive(player, classId))
-            ApplyClassTalents(player, classId, false);
+            ApplyClassTalents(player, classId, false, false);
 
         auto& talents = player->GetClassStanceTalents();
         std::erase_if(talents, [classId](auto const& pair)
@@ -481,7 +482,7 @@ namespace ClassStance
 
         for (uint8 classId : Classes)
             if (IsTalentActive(player, classId))
-                ApplyClassTalents(player, classId, true);
+                ApplyClassTalents(player, classId, true, true);
     }
 
     void DeleteTalents(ObjectGuid guid)
@@ -497,9 +498,9 @@ namespace ClassStance
         if (!talentsAlwaysActive)
         {
             if (oldClass)
-                ApplyClassTalents(player, oldClass, false);
+                ApplyClassTalents(player, oldClass, false, true);
             if (player->GetClassStance())
-                ApplyClassTalents(player, player->GetClassStance(), true);
+                ApplyClassTalents(player, player->GetClassStance(), true, true);
         }
         SendState(player);
     }
