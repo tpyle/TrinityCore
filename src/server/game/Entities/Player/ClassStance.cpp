@@ -124,14 +124,37 @@ namespace ClassStance
         return nullptr;
     }
 
+    // the class of a spell: its spell family, or for a spell of no family (Rockbiter Weapon, Flametongue Weapon, Water Breathing)
+    // the class skill line it is in (SkillLineAbility), when that line belongs to one class only (SkillRaceClassInfo)
     uint8 GetClassOfSpell(SpellInfo const* spellInfo)
     {
-        if (!spellInfo->SpellFamilyName)
+        if (spellInfo->SpellFamilyName)
+        {
+            for (uint8 classId : Classes)
+                if (ChrClassesEntry const* entry = sChrClassesStore.LookupEntry(classId))
+                    if (entry->SpellClassSet == spellInfo->SpellFamilyName)
+                        return classId;
             return 0;
-        for (uint8 classId : Classes)
-            if (ChrClassesEntry const* entry = sChrClassesStore.LookupEntry(classId))
-                if (entry->SpellClassSet == spellInfo->SpellFamilyName)
-                    return classId;
+        }
+
+        static std::unordered_map<uint32, uint8> const lineClasses = []
+        {
+            std::unordered_map<uint32, uint32> masks;
+            for (SkillRaceClassInfoEntry const* rcInfo : sSkillRaceClassInfoStore)
+                if (SkillLineEntry const* line = sSkillLineStore.LookupEntry(rcInfo->SkillID); line && line->CategoryID == SKILL_CATEGORY_CLASS)
+                    masks[rcInfo->SkillID] |= uint32(rcInfo->ClassMask);
+            std::unordered_map<uint32, uint8> out;
+            for (auto const& [skillId, mask] : masks)
+                for (uint8 classId : Classes)
+                    if (mask == 1u << (classId - 1))
+                        out[skillId] = classId;
+            return out;
+        }();
+
+        SkillLineAbilityMapBounds bounds = sSpellMgr->GetSkillLineAbilityMapBounds(spellInfo->Id);
+        for (auto itr = bounds.first; itr != bounds.second; ++itr)
+            if (auto line = lineClasses.find(itr->second->SkillLine); line != lineClasses.end())
+                return line->second;
         return 0;
     }
 
