@@ -16,6 +16,7 @@
  */
 
 #include "Config.h"
+#include "ConfigBaseFile.h"
 #include "Common.h"
 #include "Log.h"
 #include "StringConvert.h"
@@ -34,7 +35,45 @@ namespace fs  = boost::filesystem;
 namespace
 {
     std::string _filename;
-    std::vector<std::string> _additonalFiles;
+    // Additional files and directories kept on reload, in load order. A directory (worldserver.conf.d) is listed again on every
+    // reload, so a file added to it after startup is read and a removed one is dropped; keeping only the file names it held at
+    // startup made a new conf.d file invisible until a restart.
+    struct ReloadEntry
+    {
+        std::string path;
+        bool isDir;
+    };
+    std::vector<ReloadEntry> _additionalEntries;
+    std::vector<std::string> _baseFiles;   // LoadBaseFile: applied after the main file, before _additionalEntries
+
+    // The .conf files of a directory and its subdirectories, in name order, so a later file (zz-9-...) always overrides an
+    // earlier one. The order of the directory listing itself depends on the file system and is not alphabetical everywhere.
+    std::vector<std::string> ListConfigFiles(std::string const& dir)
+    {
+        std::vector<std::string> files;
+        fs::path dirPath = dir;
+        if (!fs::exists(dirPath) || !fs::is_directory(dirPath))
+            return files;
+
+        std::vector<fs::path> configFiles;
+        for (fs::directory_entry const& f : fs::recursive_directory_iterator(dirPath))
+        {
+            if (!fs::is_regular_file(f))
+                continue;
+
+            fs::path configFile = fs::absolute(f);
+            if (configFile.extension() != ".conf")
+                continue;
+
+            configFiles.push_back(std::move(configFile));
+        }
+        std::sort(configFiles.begin(), configFiles.end());
+
+        files.reserve(configFiles.size());
+        for (fs::path const& configFile : configFiles)
+            files.push_back(configFile.generic_string());
+        return files;
+    }
     std::vector<std::string> _args;
     bpt::ptree _config;
     std::mutex _configLock;
@@ -162,43 +201,64 @@ bool ConfigMgr::LoadAdditionalFile(std::string file, bool keepOnReload, std::str
 
     std::scoped_lock lock(_configLock);
 
-    if (!fullTree.empty())
-        for (bpt::ptree::value_type const& child : fullTree.begin()->second)
-            _config.put_child(bpt::ptree::path_type(child.first, '/'), child.second);
+    // A drop-in file usually has one [section] header, like worldserver.conf, but may have none (keys at the root) or more than
+    // one. Reading the first entry as the section dropped every key of a file without a header, because that entry is a key.
+    // An entry with children is a section, whose keys are merged; an entry without is a key at the root.
+    for (bpt::ptree::value_type const& entry : fullTree)
+    {
+        if (entry.second.empty())
+            _config.put_child(bpt::ptree::path_type(entry.first, '/'), entry.second);
+        else
+            for (bpt::ptree::value_type const& child : entry.second)
+                _config.put_child(bpt::ptree::path_type(child.first, '/'), child.second);
+    }
 
     if (keepOnReload)
-        _additonalFiles.emplace_back(std::move(file));
+        _additionalEntries.push_back({ std::move(file), false });
 
     return true;
 }
 
-bool ConfigMgr::LoadAdditionalDir(std::string const& dir, bool keepOnReload, std::vector<std::string>& loadedFiles, std::vector<std::string>& errors)
+bool Trinity::Config::LoadBaseFile(std::string file, std::string& error)
 {
-    fs::path dirPath = dir;
-    if (!fs::exists(dirPath) || !fs::is_directory(dirPath))
+    // check the file first, so a broken one is not kept for every later reload
+    bpt::ptree fullTree;
+    if (!LoadFile(file, fullTree, error, true))
+        return false;
+
+    {
+        std::scoped_lock lock(_configLock);
+        if (std::find(_baseFiles.begin(), _baseFiles.end(), file) == _baseFiles.end())
+            _baseFiles.push_back(std::move(file));
+    }
+
+    // build the config again in the right order: main file, base files, additional files, environment
+    std::vector<std::string> errors;
+    if (sConfigMgr->Reload(errors))
         return true;
 
-    // Load in name order, so a later file (zz-9-...) always overrides an earlier one. The order of the directory listing
-    // itself depends on the file system and is not alphabetical everywhere.
-    std::vector<fs::path> configFiles;
-    for (fs::directory_entry const& f : fs::recursive_directory_iterator(dirPath))
+    for (std::string& e : errors)
     {
-        if (!fs::is_regular_file(f))
-            continue;
-
-        fs::path configFile = fs::absolute(f);
-        if (configFile.extension() != ".conf")
-            continue;
-
-        configFiles.push_back(std::move(configFile));
+        if (!error.empty())
+            error += "; ";
+        error += e;
     }
-    std::sort(configFiles.begin(), configFiles.end());
+    return false;
+}
 
-    for (fs::path const& configFile : configFiles)
+bool ConfigMgr::LoadAdditionalDir(std::string const& dir, bool keepOnReload, std::vector<std::string>& loadedFiles, std::vector<std::string>& errors)
+{
+    // the directory itself is kept, not its files: Reload lists it again (see _additionalEntries)
+    if (keepOnReload)
     {
-        std::string fileName = configFile.generic_string();
+        std::scoped_lock lock(_configLock);
+        _additionalEntries.push_back({ dir, true });
+    }
+
+    for (std::string& fileName : ListConfigFiles(dir))
+    {
         std::string error;
-        if (LoadAdditionalFile(fileName, keepOnReload, error))
+        if (LoadAdditionalFile(fileName, false, error))
             loadedFiles.push_back(std::move(fileName));
         else
             errors.push_back(std::move(error));
@@ -242,9 +302,23 @@ bool ConfigMgr::Reload(std::vector<std::string>& errors)
     if (!LoadInitial(_filename, std::move(_args), error))
         errors.push_back(std::move(error));
 
-    for (std::string const& additionalFile : _additonalFiles)
-        if (!LoadAdditionalFile(additionalFile, false, error))
+    for (std::string const& baseFile : _baseFiles)
+        if (!LoadAdditionalFile(baseFile, false, error))
             errors.push_back(std::move(error));
+
+    for (ReloadEntry const& entry : _additionalEntries)
+    {
+        if (!entry.isDir)
+        {
+            if (!LoadAdditionalFile(entry.path, false, error))
+                errors.push_back(std::move(error));
+            continue;
+        }
+
+        for (std::string const& additionalFile : ListConfigFiles(entry.path))
+            if (!LoadAdditionalFile(additionalFile, false, error))
+                errors.push_back(std::move(error));
+    }
 
     OverrideWithEnvVariablesIfAny();
 

@@ -15,10 +15,12 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "Util.h"
 #include "TraitPacketsCommon.h"
 #include "DBCEnums.h"
 #include "PacketOperators.h"
 #include "UpdateFields.h"
+#include "Util.h"
 
 namespace WorldPackets::Traits
 {

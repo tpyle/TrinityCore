@@ -15,6 +15,7 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "Util.h"
 #include "WorldSocket.h"
 #include "AuthenticationPackets.h"
 #include "BattlenetRpcErrorCodes.h"
@@ -38,6 +39,7 @@
 #include "RealmList.pb.h"
 #include "ScriptMgr.h"
 #include "SessionKeyGenerator.h"
+#include "Util.h"
 #include "World.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
@@ -291,6 +293,11 @@ void WorldSocket::OnClose()
         std::scoped_lock sessionGuard(_worldSessionLock);
         _worldSession = nullptr;
     }
+
+    // The address's Network.ConnectionsPerIp slot is given back when the connection closes, not when this object is deleted:
+    // the WorldSession keeps its socket alive until the session itself goes (logout delay, reconnect window), so slots held
+    // to the destructor piled up and a player was refused with no connection of theirs open. CloseSocket calls this once.
+    _ipConnectionSlot.reset();
 }
 
 Trinity::Net::SocketReadCallbackResult WorldSocket::ReadHandler()

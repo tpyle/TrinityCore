@@ -493,6 +493,16 @@ Pathfinding.RoadCostMounted = 0.35
 
 Pathfinding.SlopeCoefficient = 0.0
 
+#
+#    Pathfinding.PetLiquidCost
+#        Description: Path cost of a yard of water, magma or slime for a player's pet or guardian, against 1.0 for a yard
+#                     of flat ground. Above 1.0 the pet walks round water unless swimming saves a lot of distance, instead
+#                     of swimming across whenever it is a little shorter. Other creatures and players are not affected.
+#                     Values below 1.0 count as 1.0 (stock: water costs the same as ground).
+#        Default:     2.5
+
+Pathfinding.PetLiquidCost = 2.5
+
 ###################################################################################################
 # Handcrafted road segments
 #
@@ -629,6 +639,37 @@ AddonChannel = 1
 #        Default:     1
 
 MapUpdate.Threads = 1
+
+#
+#    Bots.SkipClientPackets
+#        Description: Do not build object update packets (create, values, out of range, destroy) for bot
+#                     sessions. A bot has no client, so these packets were built and then thrown away; on a
+#                     busy bot realm that is a large part of every map update. What the server knows about
+#                     visibility is kept as before. No effect on a realm without bots.
+#        Default:     1 - (Enabled)
+#                     0 - (Disabled, build them as before; for comparing timings)
+
+Bots.SkipClientPackets = 1
+
+#
+#    Bots.SkipClientVisibility
+#        Description: A bot keeps no list of what its (missing) client has in view, so the visibility checks
+#                     for every object near a bot are not run when it moves. That list only ever decides which
+#                     packets a player gets. What others see of the bot and creature aggro are unchanged.
+#        Default:     1 - (Enabled)
+#                     0 - (Disabled, check as before; for comparing timings)
+
+Bots.SkipClientVisibility = 1
+
+#
+#    WorldTickStats.Log
+#        Description: Once a minute, write a [world_tick] line to the server log: how long a game step took
+#                     (average, p50, p95, p99, max), the map and session parts of it and the heaviest maps.
+#                     Used to measure a build before and after a change on the same scenario.
+#        Default:     0 - (Disabled)
+#                     1 - (Enabled)
+
+WorldTickStats.Log = 0
 
 #
 #    CleanCharacterDB
@@ -1269,6 +1310,16 @@ Instance.MoltenCoreSkipRunes = 0
 #                     1 - (Enabled, optional shortcut for private servers)
 
 Instance.MoltenCoreRagnarosReady = 0
+
+#
+#    Instance.NefarianCapAdds
+#        Description: Blackwing Lair, Nefarian phase 1: Lord Victor Nefarius stops calling drakonids once
+#                     42 have come (the TrinityCore way). The spawn timing stays as in 1.12 (two every
+#                     6-7 seconds, two Chromatic every 35 seconds); Nefarian still lands at 40 kills.
+#        Default:     0 - (Disabled, the 1.12 way: drakonids keep coming until 42 are killed)
+#                     1 - (Enabled, at most 42 drakonids in phase 1)
+
+Instance.NefarianCapAdds = 0
 
 #
 #    Instance.CombatResurrectionLimit
@@ -1977,6 +2028,9 @@ WorldBossLevelDiff = 3
 #    Corpse.Decay.Trivial
 #    Corpse.Decay.MinusMob
 #        Description: Time (in seconds) until creature corpse will decay if not looted or skinned.
+#                     Only how long the body lies: the respawn timer runs from the death (creature spawntimesecs and
+#                     Classic.Respawn.Level*Pct), whether the corpse is still there or not. Creatures of a spawn group
+#                     in compatibility mode (transport spawns, the Legacy Group) are the exception: they respawn after the decay time as well.
 #        Default:     300  - (5 Minutes,   Corpse.Decay.Normal)
 #                     300  - (5 Minutes,   Corpse.Decay.Elite)
 #                     300  - (5 Minutes,   Corpse.Decay.RareElite)
@@ -2199,11 +2253,12 @@ Respawn.RestartQuietTime = 3
 #    Respawn.DynamicMode
 #        Description: Select which mode (if any) should be used to adjust respawn of creatures.
 #                     This will only affect creatures that have dynamic spawn rate scaling enabled in
-#                     the spawn group table (by default, gathering nodes and quest targets with respawn time <30min
-#                     1 - Use number of players in zone
-#        Default:     0 - No dynamic respawn function
+#                     the spawn group table (by default, gathering nodes and quest targets with respawn time <30min,
+#                     and on Forever the open-world combat creatures of spawn groups 901035 and 901036)
+#        Default:     1 - Use number of players in zone
+#                     0 - No dynamic respawn function
 
-Respawn.DynamicMode = 0
+Respawn.DynamicMode = 1
 
 #
 #    Respawn.DynamicEscortNPC
@@ -3977,6 +4032,24 @@ AuctionHouseBot.Vanilla.ValueCurve.Scale = 1
 AuctionHouseBot.Vanilla.ValueCurve.FullValueItemLevel = 0
 
 #
+#    AuctionHouseBot.Vanilla.MarketPrices
+#       Description: Price bot listings (and the buyer's fair price) by the per-unit market price in the world table
+#                    auctionhousebot_market_price where an item has one, priced to the copper and never below what a
+#                    vendor pays for the item. Items without a row keep AuctionHouseBot.Vanilla.ValueCurve or the
+#                    vendor price. Read when the bot starts.
+#       Default:     0 - (Disabled)
+#                    1 - (Enabled)
+
+AuctionHouseBot.Vanilla.MarketPrices = 0
+
+#
+#    AuctionHouseBot.Vanilla.MarketPrices.Scale
+#       Description: Multiplies the market prices (1 = as stored, 1.2 = 20% more, 0.1 to 10). Never below what a vendor pays.
+#       Default:     1
+
+AuctionHouseBot.Vanilla.MarketPrices.Scale = 1
+
+#
 #    AuctionHouseBot.Alliance.Items.Amount.Ratio
 #       Description: Enable/Disable (disabled if 0) the part of AHBot that puts items up for auction on Alliance AH
 #       Default:     100 - (Enabled with 100% of items specified in AuctionHouse.Items.Amount.color section)
@@ -4482,6 +4555,26 @@ AuctionHouseBot.Buyer.Commodities = 1
 AuctionHouseBot.Buyer.DropFloorPerLevel = 100
 
 #
+#    AuctionHouseBot.Buyer.ExcludeUnlimitedVendorItems
+#       Description: The buyer never buys items that a vendor in the world sells for gold with unlimited
+#                    stock (arrows, thread, reagents...). The buyer pays at least the vendor price, so
+#                    players could buy them from the vendor and sell them to the buyer for profit.
+#                    Items a vendor sells in limited stock, or for tokens, can still be bought.
+#                    Only the buyer is affected, not the seller.
+#       Default:     1 - (Enabled)
+#                    0 - (Disabled)
+
+AuctionHouseBot.Buyer.ExcludeUnlimitedVendorItems = 1
+
+#
+#    AuctionHouseBot.Buyer.ExcludeItemIDs
+#       Description: Item ids the buyer never buys, separated by commas, e.g. "2512,2515,2321".
+#                    Only the buyer is affected, not the seller.
+#       Default:     "" - (None)
+
+AuctionHouseBot.Buyer.ExcludeItemIDs = ""
+
+#
 #    AuctionHouseBot.Buyer.MaxPriceMultiplier
 #       Description: Never pay more per item than this times its fair price (vendor buy price, or four
 #                    times the vendor sell price, at least 1 silver).
@@ -4933,6 +5026,15 @@ Load.Locales = 1
 ###################################################################################################
 # DEATH RECAP (deathcam)
 #
+#    Classic.Hardcore
+#        Description: Classic 1.60 Hardcore ruleset realm: death is permanent (no spirit healer, corpse run or resurrection
+#                     brings a character back; only staff with .revive), and the client shows its Hardcore interface.
+#                     Read at server start.
+#        Default:     0 - (Normal realm)
+#                     1 - (Hardcore realm)
+
+Classic.Hardcore = 0
+
 #    Recap.Enable
 #        Description: Record the last seconds around players and let anyone watch a death again
 #                     (".recap <number>", or click [Recap] with the ForeverRecap addon).
@@ -4983,6 +5085,14 @@ Recap.Announce = 3
 #                     1 - (Enabled)
 
 Classic.GuildFinder = 0
+
+#    Classic.AdventureGuide
+#        Description: Adventure Guide (Shift-J): boss abilities and loot of dungeons and raids. The official realm
+#                     has it closed (game rule 42, EncounterJournalDisabled).
+#        Default:     0 - (Closed, as on the official realm)
+#                     1 - (Open)
+
+Classic.AdventureGuide = 0
 
 #    Classic.OpcodeGroupShift
 #        Description: Client 1.60.1.70291 numbers the message groups one higher than 70245 (and changed some packet and
@@ -5160,6 +5270,17 @@ Classic.CreatureHealth.RaiseFromLevel = 20
 Classic.CreatureHealth.RaiseAt60Pct = 20
 Classic.CreatureHealth.Raids = 0
 
+#    Forever.VanillaAoE
+#        Description: Puts the two AoE spells WoW Forever reworked back to vanilla 1.12.
+#                     Consecration: every enemy in it takes the vanilla damage each second (rank 1: 64 over 8 sec, rank 5:
+#                     384) with about 33% spell power, instead of Forever's small hit plus an extra hit.
+#                     Improved Blizzard: the Chill slows by 30 / 50 / 65% (rank 1 / 2 / 3) instead of 15 / 25 / 40%.
+#                     Players' tooltips show the vanilla numbers too (sent at login). Needs a restart.
+#        Default:     0 - (Disabled, the WoW Forever spells)
+#                     1 - (Enabled, vanilla)
+
+Forever.VanillaAoE = 0
+
 #    Classic.AutoEquipNewBags
 #        Description: A new bag goes straight onto an empty bag slot. WoW Forever stopped this: new bags go into the
 #                     backpack and the player puts them on by hand. Bots always put new bags on.
@@ -5167,6 +5288,24 @@ Classic.CreatureHealth.Raids = 0
 #                     1 - (Enabled, old behaviour)
 
 Classic.AutoEquipNewBags = 0
+
+#    Classic.ScourgeInvasion
+#        Description: The Scourge Invasion world event (the Naxxramas opening): necropolises attack six zones in turn,
+#                     players kill minions and cultists to bring them down, battles won unlock the Argent Dawn
+#                     rewards at 50 / 100 / 150, and Pallid Horrors attack Stormwind and Undercity. GMs can also
+#                     switch it with .scourge on / off (saved, wins over this setting until .scourge default).
+#                     .reload config reads it again.
+#        Default:     0 - (Disabled)
+#                     1 - (Enabled)
+
+Classic.ScourgeInvasion = 0
+
+#    Classic.ScourgeInvasion.ShardDamageRate
+#        Description: How much the minion, cultist and Shadow of Doom deaths hurt the Necrotic Shards. Above 1 the
+#                     camps fall faster (small servers), below 1 slower.
+#        Default:     1.0
+
+Classic.ScourgeInvasion.ShardDamageRate = 1.0
 
 #    Classic.Shop.Enabled
 #        Description: In-game Store: shop points, products from world.shop_* (.shop reload), the Gold Market, character
@@ -5224,3 +5363,18 @@ Discord.Channel.Enable = 0
 #        Default:     "Discord"
 
 Discord.Channel.Name = "Discord"
+
+#
+#    Forever.DayCycle.Speed
+#        Description: How fast the sky runs from day to night for the whole realm. The time of day shown is worked out from
+#                     the realm's clock, so every player sees the same sky, also after a restart. Only the sky changes:
+#                     events, resets, respawns and scripts keep the realm's own time. Players can also keep their own
+#                     character at noon or midnight with .time day / .time night (.time auto goes back to this).
+#                     Read at server start (a restart is needed after a change).
+#        Default:     1  - (The realm's own clock: a day takes 24 hours)
+#                     2  - (Twice as fast: a day takes 12 hours)
+#                     3  - (Three times as fast: a day takes 8 hours)
+#                     ...
+#                     24 - (A day takes an hour)
+
+Forever.DayCycle.Speed = 1

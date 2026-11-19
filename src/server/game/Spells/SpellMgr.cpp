@@ -20,6 +20,7 @@
 #include "BattlefieldMgr.h"
 #include "BattlegroundMgr.h"
 #include "Chat.h"
+#include "ClassicVanillaAoe.h"
 #include "DB2HotfixGenerator.h"
 #include "DB2Stores.h"
 #include "DatabaseEnv.h"
@@ -34,6 +35,7 @@
 #include "SpellAuraDefines.h"
 #include "SpellInfo.h"
 #include "StringConvert.h"
+#include "World.h"
 #include <G3D/g3dmath.h>
 #include <algorithm>
 #include <boost/multi_index/composite_key.hpp>
@@ -1506,6 +1508,268 @@ void SpellMgr::LoadSpellGroupStackRules()
     TC_LOG_INFO("server.loading", ">> Parsed {} SPELL_GROUP_STACK_RULE_EXCLUSIVE_SAME_EFFECT stack rules in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
 }
 
+Optional<SpellProcEntry> SpellMgr::GenerateDefaultSpellProcEntry(SpellInfo const& spellInfo)
+{
+    struct AuraTypes
+    {
+        // Define can trigger auras
+        bool isTriggerAura[TOTAL_AURAS];
+        // Triggered always, even from triggered spells
+        bool isAlwaysTriggeredAura[TOTAL_AURAS];
+        // SpellTypeMask to add to the proc
+        ProcFlagsSpellType spellTypeMask[TOTAL_AURAS];
+
+        AuraTypes()
+        {
+            // List of auras that CAN trigger but may not exist in spell_proc
+            // in most cases needed to drop charges
+
+            // some aura types need additional checks (eg SPELL_AURA_MECHANIC_IMMUNITY needs mechanic check)
+            // see AuraEffect::CheckEffectProc
+            for (uint16 i = 0; i < TOTAL_AURAS; ++i)
+            {
+                isTriggerAura[i] = false;
+                isAlwaysTriggeredAura[i] = false;
+                spellTypeMask[i] = PROC_SPELL_TYPE_MASK_ALL;
+            }
+
+            isTriggerAura[SPELL_AURA_DUMMY] = true;
+            isTriggerAura[SPELL_AURA_PERIODIC_DUMMY] = true;
+            isTriggerAura[SPELL_AURA_MOD_CONFUSE] = true;
+            isTriggerAura[SPELL_AURA_MOD_THREAT] = true;
+            isTriggerAura[SPELL_AURA_MOD_STUN] = true; // Aura does not have charges but needs to be removed on trigger
+            isTriggerAura[SPELL_AURA_MOD_DAMAGE_DONE] = true;
+            isTriggerAura[SPELL_AURA_MOD_DAMAGE_TAKEN] = true;
+            isTriggerAura[SPELL_AURA_MOD_RESISTANCE] = true;
+            isTriggerAura[SPELL_AURA_MOD_STEALTH] = true;
+            isTriggerAura[SPELL_AURA_MOD_FEAR] = true; // Aura does not have charges but needs to be removed on trigger
+            isTriggerAura[SPELL_AURA_MOD_ROOT] = true;
+            isTriggerAura[SPELL_AURA_TRANSFORM] = true;
+            isTriggerAura[SPELL_AURA_REFLECT_SPELLS] = true;
+            isTriggerAura[SPELL_AURA_DAMAGE_IMMUNITY] = true;
+            isTriggerAura[SPELL_AURA_PROC_TRIGGER_SPELL] = true;
+            isTriggerAura[SPELL_AURA_PROC_TRIGGER_DAMAGE] = true;
+            isTriggerAura[SPELL_AURA_MOD_CASTING_SPEED_NOT_STACK] = true;
+            isTriggerAura[SPELL_AURA_SCHOOL_ABSORB] = true; // Savage Defense untested
+            isTriggerAura[SPELL_AURA_MOD_POWER_COST_SCHOOL_PCT] = true;
+            isTriggerAura[SPELL_AURA_MOD_POWER_COST_SCHOOL] = true;
+            isTriggerAura[SPELL_AURA_REFLECT_SPELLS_SCHOOL] = true;
+            isTriggerAura[SPELL_AURA_MECHANIC_IMMUNITY] = true;
+            isTriggerAura[SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN] = true;
+            isTriggerAura[SPELL_AURA_SPELL_MAGNET] = true;
+            isTriggerAura[SPELL_AURA_MOD_ATTACK_POWER] = true;
+            isTriggerAura[SPELL_AURA_MOD_POWER_REGEN_PERCENT] = true;
+            isTriggerAura[SPELL_AURA_INTERCEPT_MELEE_RANGED_ATTACKS] = true;
+            isTriggerAura[SPELL_AURA_OVERRIDE_CLASS_SCRIPTS] = true;
+            isTriggerAura[SPELL_AURA_MOD_MECHANIC_RESISTANCE] = true;
+            isTriggerAura[SPELL_AURA_RANGED_ATTACK_POWER_ATTACKER_BONUS] = true;
+            isTriggerAura[SPELL_AURA_MOD_MELEE_HASTE] = true;
+            isTriggerAura[SPELL_AURA_MOD_MELEE_HASTE_3] = true;
+            isTriggerAura[SPELL_AURA_MOD_ATTACKER_MELEE_HIT_CHANCE] = true;
+            isTriggerAura[SPELL_AURA_PROC_TRIGGER_SPELL_WITH_VALUE] = true;
+            isTriggerAura[SPELL_AURA_MOD_SCHOOL_MASK_DAMAGE_FROM_CASTER] = true;
+            isTriggerAura[SPELL_AURA_MOD_SPELL_DAMAGE_FROM_CASTER] = true;
+            isTriggerAura[SPELL_AURA_MOD_SPELL_CRIT_CHANCE] = true;
+            isTriggerAura[SPELL_AURA_ABILITY_IGNORE_AURASTATE] = true;
+            isTriggerAura[SPELL_AURA_MOD_INVISIBILITY] = true;
+            isTriggerAura[SPELL_AURA_FORCE_REACTION] = true;
+            isTriggerAura[SPELL_AURA_MOD_TAUNT] = true;
+            isTriggerAura[SPELL_AURA_MOD_DETAUNT] = true;
+            isTriggerAura[SPELL_AURA_MOD_DAMAGE_PERCENT_DONE] = true;
+            isTriggerAura[SPELL_AURA_MOD_ATTACK_POWER_PCT] = true;
+            isTriggerAura[SPELL_AURA_MOD_HIT_CHANCE] = true;
+            isTriggerAura[SPELL_AURA_MOD_WEAPON_CRIT_PERCENT] = true;
+            isTriggerAura[SPELL_AURA_MOD_BLOCK_PERCENT] = true;
+            isTriggerAura[SPELL_AURA_MOD_ROOT_2] = true;
+            isTriggerAura[SPELL_AURA_IGNORE_SPELL_COOLDOWN] = true;
+
+            isAlwaysTriggeredAura[SPELL_AURA_OVERRIDE_CLASS_SCRIPTS] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_MOD_STEALTH] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_MOD_CONFUSE] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_MOD_FEAR] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_MOD_ROOT] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_MOD_STUN] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_TRANSFORM] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_MOD_INVISIBILITY] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_SPELL_MAGNET] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_SCHOOL_ABSORB] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_MOD_STEALTH] = true;
+            isAlwaysTriggeredAura[SPELL_AURA_MOD_ROOT_2] = true;
+
+            spellTypeMask[SPELL_AURA_MOD_STEALTH] = PROC_SPELL_TYPE_DAMAGE | PROC_SPELL_TYPE_NO_DMG_HEAL;
+            spellTypeMask[SPELL_AURA_MOD_CONFUSE] = PROC_SPELL_TYPE_DAMAGE;
+            spellTypeMask[SPELL_AURA_MOD_FEAR] = PROC_SPELL_TYPE_DAMAGE;
+            spellTypeMask[SPELL_AURA_MOD_ROOT] = PROC_SPELL_TYPE_DAMAGE;
+            spellTypeMask[SPELL_AURA_MOD_ROOT_2] = PROC_SPELL_TYPE_DAMAGE;
+            spellTypeMask[SPELL_AURA_MOD_STUN] = PROC_SPELL_TYPE_DAMAGE;
+            spellTypeMask[SPELL_AURA_TRANSFORM] = PROC_SPELL_TYPE_DAMAGE;
+            spellTypeMask[SPELL_AURA_MOD_INVISIBILITY] = PROC_SPELL_TYPE_DAMAGE;
+
+        }
+    };
+    static AuraTypes const types;
+    auto const& isTriggerAura = types.isTriggerAura;
+    auto const& isAlwaysTriggeredAura = types.isAlwaysTriggeredAura;
+    auto const& spellTypeMask = types.spellTypeMask;
+
+    // Nothing to do if no flags set
+    if (!spellInfo.ProcFlags)
+        return {};
+
+    // Requiring a used modifier is aura-wide. Mixed trigger/modifier auras
+    // retain their existing rules and can be configured explicitly in SQL.
+    bool chargedSpellmod = spellInfo.HasAttribute(SPELL_ATTR15_UNK13) && spellInfo.ProcCharges > 0
+        && std::ranges::all_of(spellInfo.GetEffects(), [](SpellEffectInfo const& effect)
+        {
+            return !effect.IsAura() || effect.ApplyAuraName == SPELL_AURA_ADD_FLAT_MODIFIER
+                || effect.ApplyAuraName == SPELL_AURA_ADD_PCT_MODIFIER;
+        });
+    auto canTrigger = [&](uint32 auraName)
+    {
+        return isTriggerAura[auraName] || (chargedSpellmod
+            && (auraName == SPELL_AURA_ADD_FLAT_MODIFIER || auraName == SPELL_AURA_ADD_PCT_MODIFIER));
+    };
+
+    bool addTriggerFlag = false;
+    ProcFlagsSpellType procSpellTypeMask = PROC_SPELL_TYPE_NONE;
+    uint32 nonProcMask = 0;
+    for (SpellEffectInfo const& spellEffectInfo : spellInfo.GetEffects())
+    {
+        if (!spellEffectInfo.IsEffect())
+            continue;
+
+        uint32 auraName = spellEffectInfo.ApplyAuraName;
+        if (!auraName)
+            continue;
+
+        if (!canTrigger(auraName))
+        {
+            // explicitly disable non proccing auras to avoid losing charges on self proc
+            nonProcMask |= 1 << spellEffectInfo.EffectIndex;
+            continue;
+        }
+
+        procSpellTypeMask |= spellTypeMask[auraName];
+        if (isAlwaysTriggeredAura[auraName])
+            addTriggerFlag = true;
+
+        // many proc auras with taken procFlag mask don't have attribute "can proc with triggered"
+        // they should proc nevertheless (example mage armor spells with judgement)
+        if (!addTriggerFlag && (spellInfo.ProcFlags & TAKEN_HIT_PROC_FLAG_MASK) != 0)
+        {
+            switch (auraName)
+            {
+                case SPELL_AURA_PROC_TRIGGER_SPELL:
+                case SPELL_AURA_PROC_TRIGGER_DAMAGE:
+                    addTriggerFlag = true;
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    if (!procSpellTypeMask)
+    {
+        for (SpellEffectInfo const& spellEffectInfo : spellInfo.GetEffects())
+        {
+            if (spellEffectInfo.IsAura())
+            {
+                TC_LOG_ERROR("sql.sql", "Spell Id {} has DBC ProcFlags 0x{:X} 0x{:X}, but it's of non-proc aura type, it probably needs an entry in `spell_proc` table to be handled correctly.",
+                    spellInfo.Id, uint32(spellInfo.ProcFlags[0]), uint32(spellInfo.ProcFlags[1]));
+                break;
+            }
+        }
+
+        return {};
+    }
+
+    SpellProcEntry procEntry;
+    procEntry.SchoolMask      = 0;
+    procEntry.ProcFlags = spellInfo.ProcFlags;
+    procEntry.SpellFamilyName = 0;
+    for (SpellEffectInfo const& spellEffectInfo : spellInfo.GetEffects())
+        if (spellEffectInfo.IsEffect() && canTrigger(spellEffectInfo.ApplyAuraName))
+            procEntry.SpellFamilyMask |= spellEffectInfo.SpellClassMask;
+
+    if (procEntry.SpellFamilyMask)
+        procEntry.SpellFamilyName = spellInfo.SpellFamilyName;
+
+    procEntry.SpellTypeMask   = procSpellTypeMask;
+    procEntry.SpellPhaseMask  = PROC_SPELL_PHASE_HIT;
+    procEntry.HitMask         = PROC_HIT_NONE; // uses default proc @see SpellMgr::CanSpellTriggerProcOnEvent
+
+    if (!(procEntry.ProcFlags & REQ_SPELL_PHASE_PROC_FLAG_MASK) && procEntry.ProcFlags & PROC_FLAG_2_CAST_SUCCESSFUL)
+        procEntry.SpellPhaseMask = PROC_SPELL_PHASE_CAST; // set default phase for PROC_FLAG_2_CAST_SUCCESSFUL
+
+    bool triggersSpell = false;
+    for (SpellEffectInfo const& spellEffectInfo : spellInfo.GetEffects())
+    {
+        if (!spellEffectInfo.IsAura())
+            continue;
+
+        switch (spellEffectInfo.ApplyAuraName)
+        {
+            // Reflect auras should only proc off reflects
+            case SPELL_AURA_REFLECT_SPELLS:
+            case SPELL_AURA_REFLECT_SPELLS_SCHOOL:
+                procEntry.HitMask = PROC_HIT_REFLECT;
+                break;
+            // Only drop charge on crit
+            case SPELL_AURA_MOD_WEAPON_CRIT_PERCENT:
+                procEntry.HitMask = PROC_HIT_CRITICAL;
+                break;
+            // Only drop charge on block
+            case SPELL_AURA_MOD_BLOCK_PERCENT:
+                procEntry.HitMask = PROC_HIT_BLOCK;
+                break;
+            // proc auras with another aura reducing hit chance (eg 63767) only proc on missed attack
+            case SPELL_AURA_MOD_HIT_CHANCE:
+                if (spellEffectInfo.CalcValueAsInt() <= -100)
+                    procEntry.HitMask = PROC_HIT_MISS;
+                break;
+            case SPELL_AURA_PROC_TRIGGER_SPELL:
+            case SPELL_AURA_PROC_TRIGGER_SPELL_WITH_VALUE:
+                triggersSpell = spellEffectInfo.TriggerSpell != 0;
+                break;
+            default:
+                continue;
+        }
+        break;
+    }
+
+    procEntry.AttributesMask  = PROC_ATTR_NONE;
+    if (chargedSpellmod)
+        procEntry.AttributesMask |= PROC_ATTR_REQ_SPELLMOD;
+    procEntry.DisableEffectsMask = nonProcMask;
+    if (spellInfo.ProcFlags & PROC_FLAG_KILL)
+        procEntry.AttributesMask |= PROC_ATTR_REQ_EXP_OR_HONOR;
+    if (addTriggerFlag)
+        procEntry.AttributesMask |= PROC_ATTR_TRIGGERED_CAN_PROC;
+
+    procEntry.ProcsPerMinute  = 0;
+    procEntry.Chance          = spellInfo.ProcChance;
+    procEntry.Cooldown        = Milliseconds(spellInfo.ProcCooldown);
+    procEntry.Charges         = spellInfo.ProcCharges;
+
+    if (spellInfo.HasAttribute(SPELL_ATTR3_CAN_PROC_FROM_PROCS) && !procEntry.SpellFamilyMask
+        && procEntry.Chance >= 100
+        && spellInfo.ProcBasePPM <= 0.0f
+        && procEntry.Cooldown <= 0ms
+        && procEntry.Charges <= 0
+        && procEntry.ProcFlags & (PROC_FLAG_DEAL_MELEE_ABILITY | PROC_FLAG_DEAL_RANGED_ATTACK | PROC_FLAG_DEAL_RANGED_ABILITY | PROC_FLAG_DEAL_HELPFUL_ABILITY
+            | PROC_FLAG_DEAL_HARMFUL_ABILITY | PROC_FLAG_DEAL_HELPFUL_SPELL | PROC_FLAG_DEAL_HARMFUL_SPELL | PROC_FLAG_DEAL_HARMFUL_PERIODIC
+            | PROC_FLAG_DEAL_HELPFUL_PERIODIC)
+        && triggersSpell)
+    {
+        TC_LOG_ERROR("sql.sql", "Spell Id {} has SPELL_ATTR3_CAN_PROC_FROM_PROCS attribute and no restriction on what spells can cause it to proc and no cooldown. "
+            "This spell can cause infinite proc loops. Proc data for this spell was not generated, data in `spell_proc` table is required for it to function!",
+            spellInfo.Id);
+        return {};
+    }
+    return procEntry;
+}
+
 void SpellMgr::LoadSpellProcs()
 {
     uint32 oldMSTime = getMSTime();
@@ -1669,97 +1933,6 @@ void SpellMgr::LoadSpellProcs()
 
     TC_LOG_INFO("server.loading", ">> Loaded {} spell proc conditions and data in {} ms", count, GetMSTimeDiffToNow(oldMSTime));
 
-    // Define can trigger auras
-    bool isTriggerAura[TOTAL_AURAS];
-    // Triggered always, even from triggered spells
-    bool isAlwaysTriggeredAura[TOTAL_AURAS];
-    // SpellTypeMask to add to the proc
-    ProcFlagsSpellType spellTypeMask[TOTAL_AURAS];
-
-    // List of auras that CAN trigger but may not exist in spell_proc
-    // in most cases needed to drop charges
-
-    // some aura types need additional checks (eg SPELL_AURA_MECHANIC_IMMUNITY needs mechanic check)
-    // see AuraEffect::CheckEffectProc
-    for (uint16 i = 0; i < TOTAL_AURAS; ++i)
-    {
-        isTriggerAura[i] = false;
-        isAlwaysTriggeredAura[i] = false;
-        spellTypeMask[i] = PROC_SPELL_TYPE_MASK_ALL;
-    }
-
-    isTriggerAura[SPELL_AURA_DUMMY] = true;
-    isTriggerAura[SPELL_AURA_PERIODIC_DUMMY] = true;
-    isTriggerAura[SPELL_AURA_MOD_CONFUSE] = true;
-    isTriggerAura[SPELL_AURA_MOD_THREAT] = true;
-    isTriggerAura[SPELL_AURA_MOD_STUN] = true; // Aura does not have charges but needs to be removed on trigger
-    isTriggerAura[SPELL_AURA_MOD_DAMAGE_DONE] = true;
-    isTriggerAura[SPELL_AURA_MOD_DAMAGE_TAKEN] = true;
-    isTriggerAura[SPELL_AURA_MOD_RESISTANCE] = true;
-    isTriggerAura[SPELL_AURA_MOD_STEALTH] = true;
-    isTriggerAura[SPELL_AURA_MOD_FEAR] = true; // Aura does not have charges but needs to be removed on trigger
-    isTriggerAura[SPELL_AURA_MOD_ROOT] = true;
-    isTriggerAura[SPELL_AURA_TRANSFORM] = true;
-    isTriggerAura[SPELL_AURA_REFLECT_SPELLS] = true;
-    isTriggerAura[SPELL_AURA_DAMAGE_IMMUNITY] = true;
-    isTriggerAura[SPELL_AURA_PROC_TRIGGER_SPELL] = true;
-    isTriggerAura[SPELL_AURA_PROC_TRIGGER_DAMAGE] = true;
-    isTriggerAura[SPELL_AURA_MOD_CASTING_SPEED_NOT_STACK] = true;
-    isTriggerAura[SPELL_AURA_SCHOOL_ABSORB] = true; // Savage Defense untested
-    isTriggerAura[SPELL_AURA_MOD_POWER_COST_SCHOOL_PCT] = true;
-    isTriggerAura[SPELL_AURA_MOD_POWER_COST_SCHOOL] = true;
-    isTriggerAura[SPELL_AURA_REFLECT_SPELLS_SCHOOL] = true;
-    isTriggerAura[SPELL_AURA_MECHANIC_IMMUNITY] = true;
-    isTriggerAura[SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN] = true;
-    isTriggerAura[SPELL_AURA_SPELL_MAGNET] = true;
-    isTriggerAura[SPELL_AURA_MOD_ATTACK_POWER] = true;
-    isTriggerAura[SPELL_AURA_MOD_POWER_REGEN_PERCENT] = true;
-    isTriggerAura[SPELL_AURA_INTERCEPT_MELEE_RANGED_ATTACKS] = true;
-    isTriggerAura[SPELL_AURA_OVERRIDE_CLASS_SCRIPTS] = true;
-    isTriggerAura[SPELL_AURA_MOD_MECHANIC_RESISTANCE] = true;
-    isTriggerAura[SPELL_AURA_RANGED_ATTACK_POWER_ATTACKER_BONUS] = true;
-    isTriggerAura[SPELL_AURA_MOD_MELEE_HASTE] = true;
-    isTriggerAura[SPELL_AURA_MOD_MELEE_HASTE_3] = true;
-    isTriggerAura[SPELL_AURA_MOD_ATTACKER_MELEE_HIT_CHANCE] = true;
-    isTriggerAura[SPELL_AURA_PROC_TRIGGER_SPELL_WITH_VALUE] = true;
-    isTriggerAura[SPELL_AURA_MOD_SCHOOL_MASK_DAMAGE_FROM_CASTER] = true;
-    isTriggerAura[SPELL_AURA_MOD_SPELL_DAMAGE_FROM_CASTER] = true;
-    isTriggerAura[SPELL_AURA_MOD_SPELL_CRIT_CHANCE] = true;
-    isTriggerAura[SPELL_AURA_ABILITY_IGNORE_AURASTATE] = true;
-    isTriggerAura[SPELL_AURA_MOD_INVISIBILITY] = true;
-    isTriggerAura[SPELL_AURA_FORCE_REACTION] = true;
-    isTriggerAura[SPELL_AURA_MOD_TAUNT] = true;
-    isTriggerAura[SPELL_AURA_MOD_DETAUNT] = true;
-    isTriggerAura[SPELL_AURA_MOD_DAMAGE_PERCENT_DONE] = true;
-    isTriggerAura[SPELL_AURA_MOD_ATTACK_POWER_PCT] = true;
-    isTriggerAura[SPELL_AURA_MOD_HIT_CHANCE] = true;
-    isTriggerAura[SPELL_AURA_MOD_WEAPON_CRIT_PERCENT] = true;
-    isTriggerAura[SPELL_AURA_MOD_BLOCK_PERCENT] = true;
-    isTriggerAura[SPELL_AURA_MOD_ROOT_2] = true;
-    isTriggerAura[SPELL_AURA_IGNORE_SPELL_COOLDOWN] = true;
-
-    isAlwaysTriggeredAura[SPELL_AURA_OVERRIDE_CLASS_SCRIPTS] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_MOD_STEALTH] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_MOD_CONFUSE] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_MOD_FEAR] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_MOD_ROOT] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_MOD_STUN] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_TRANSFORM] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_MOD_INVISIBILITY] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_SPELL_MAGNET] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_SCHOOL_ABSORB] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_MOD_STEALTH] = true;
-    isAlwaysTriggeredAura[SPELL_AURA_MOD_ROOT_2] = true;
-
-    spellTypeMask[SPELL_AURA_MOD_STEALTH] = PROC_SPELL_TYPE_DAMAGE | PROC_SPELL_TYPE_NO_DMG_HEAL;
-    spellTypeMask[SPELL_AURA_MOD_CONFUSE] = PROC_SPELL_TYPE_DAMAGE;
-    spellTypeMask[SPELL_AURA_MOD_FEAR] = PROC_SPELL_TYPE_DAMAGE;
-    spellTypeMask[SPELL_AURA_MOD_ROOT] = PROC_SPELL_TYPE_DAMAGE;
-    spellTypeMask[SPELL_AURA_MOD_ROOT_2] = PROC_SPELL_TYPE_DAMAGE;
-    spellTypeMask[SPELL_AURA_MOD_STUN] = PROC_SPELL_TYPE_DAMAGE;
-    spellTypeMask[SPELL_AURA_TRANSFORM] = PROC_SPELL_TYPE_DAMAGE;
-    spellTypeMask[SPELL_AURA_MOD_INVISIBILITY] = PROC_SPELL_TYPE_DAMAGE;
-
     // This generates default procs to retain compatibility with previous proc system
     TC_LOG_INFO("server.loading", "Generating spell proc data from SpellMap...");
     count = 0;
@@ -1773,148 +1946,11 @@ void SpellMgr::LoadSpellProcs()
         if (GetSpellProcEntry(&spellInfo) != nullptr)
             continue;
 
-        // Nothing to do if no flags set
-        if (!spellInfo.ProcFlags)
-            continue;
-
-        bool addTriggerFlag = false;
-        ProcFlagsSpellType procSpellTypeMask = PROC_SPELL_TYPE_NONE;
-        uint32 nonProcMask = 0;
-        for (SpellEffectInfo const& spellEffectInfo : spellInfo.GetEffects())
+        if (Optional<SpellProcEntry> procEntry = GenerateDefaultSpellProcEntry(spellInfo))
         {
-            if (!spellEffectInfo.IsEffect())
-                continue;
-
-            uint32 auraName = spellEffectInfo.ApplyAuraName;
-            if (!auraName)
-                continue;
-
-            if (!isTriggerAura[auraName])
-            {
-                // explicitly disable non proccing auras to avoid losing charges on self proc
-                nonProcMask |= 1 << spellEffectInfo.EffectIndex;
-                continue;
-            }
-
-            procSpellTypeMask |= spellTypeMask[auraName];
-            if (isAlwaysTriggeredAura[auraName])
-                addTriggerFlag = true;
-
-            // many proc auras with taken procFlag mask don't have attribute "can proc with triggered"
-            // they should proc nevertheless (example mage armor spells with judgement)
-            if (!addTriggerFlag && (spellInfo.ProcFlags & TAKEN_HIT_PROC_FLAG_MASK) != 0)
-            {
-                switch (auraName)
-                {
-                    case SPELL_AURA_PROC_TRIGGER_SPELL:
-                    case SPELL_AURA_PROC_TRIGGER_DAMAGE:
-                        addTriggerFlag = true;
-                        break;
-                    default:
-                        break;
-                }
-            }
+            generatedSpellProcMap[{ spellInfo.Id, spellInfo.Difficulty }] = *procEntry;
+            ++count;
         }
-
-        if (!procSpellTypeMask)
-        {
-            for (SpellEffectInfo const& spellEffectInfo : spellInfo.GetEffects())
-            {
-                if (spellEffectInfo.IsAura())
-                {
-                    TC_LOG_ERROR("sql.sql", "Spell Id {} has DBC ProcFlags 0x{:X} 0x{:X}, but it's of non-proc aura type, it probably needs an entry in `spell_proc` table to be handled correctly.",
-                        spellInfo.Id, uint32(spellInfo.ProcFlags[0]), uint32(spellInfo.ProcFlags[1]));
-                    break;
-                }
-            }
-
-            continue;
-        }
-
-        SpellProcEntry procEntry;
-        procEntry.SchoolMask      = 0;
-        procEntry.ProcFlags = spellInfo.ProcFlags;
-        procEntry.SpellFamilyName = 0;
-        for (SpellEffectInfo const& spellEffectInfo : spellInfo.GetEffects())
-            if (spellEffectInfo.IsEffect() && isTriggerAura[spellEffectInfo.ApplyAuraName])
-                procEntry.SpellFamilyMask |= spellEffectInfo.SpellClassMask;
-
-        if (procEntry.SpellFamilyMask)
-            procEntry.SpellFamilyName = spellInfo.SpellFamilyName;
-
-        procEntry.SpellTypeMask   = procSpellTypeMask;
-        procEntry.SpellPhaseMask  = PROC_SPELL_PHASE_HIT;
-        procEntry.HitMask         = PROC_HIT_NONE; // uses default proc @see SpellMgr::CanSpellTriggerProcOnEvent
-
-        if (!(procEntry.ProcFlags & REQ_SPELL_PHASE_PROC_FLAG_MASK) && procEntry.ProcFlags & PROC_FLAG_2_CAST_SUCCESSFUL)
-            procEntry.SpellPhaseMask = PROC_SPELL_PHASE_CAST; // set default phase for PROC_FLAG_2_CAST_SUCCESSFUL
-
-        bool triggersSpell = false;
-        for (SpellEffectInfo const& spellEffectInfo : spellInfo.GetEffects())
-        {
-            if (!spellEffectInfo.IsAura())
-                continue;
-
-            switch (spellEffectInfo.ApplyAuraName)
-            {
-                // Reflect auras should only proc off reflects
-                case SPELL_AURA_REFLECT_SPELLS:
-                case SPELL_AURA_REFLECT_SPELLS_SCHOOL:
-                    procEntry.HitMask = PROC_HIT_REFLECT;
-                    break;
-                // Only drop charge on crit
-                case SPELL_AURA_MOD_WEAPON_CRIT_PERCENT:
-                    procEntry.HitMask = PROC_HIT_CRITICAL;
-                    break;
-                // Only drop charge on block
-                case SPELL_AURA_MOD_BLOCK_PERCENT:
-                    procEntry.HitMask = PROC_HIT_BLOCK;
-                    break;
-                // proc auras with another aura reducing hit chance (eg 63767) only proc on missed attack
-                case SPELL_AURA_MOD_HIT_CHANCE:
-                    if (spellEffectInfo.CalcValueAsInt() <= -100)
-                        procEntry.HitMask = PROC_HIT_MISS;
-                    break;
-                case SPELL_AURA_PROC_TRIGGER_SPELL:
-                case SPELL_AURA_PROC_TRIGGER_SPELL_WITH_VALUE:
-                    triggersSpell = spellEffectInfo.TriggerSpell != 0;
-                    break;
-                default:
-                    continue;
-            }
-            break;
-        }
-
-        procEntry.AttributesMask  = PROC_ATTR_NONE;
-        procEntry.DisableEffectsMask = nonProcMask;
-        if (spellInfo.ProcFlags & PROC_FLAG_KILL)
-            procEntry.AttributesMask |= PROC_ATTR_REQ_EXP_OR_HONOR;
-        if (addTriggerFlag)
-            procEntry.AttributesMask |= PROC_ATTR_TRIGGERED_CAN_PROC;
-
-        procEntry.ProcsPerMinute  = 0;
-        procEntry.Chance          = spellInfo.ProcChance;
-        procEntry.Cooldown        = Milliseconds(spellInfo.ProcCooldown);
-        procEntry.Charges         = spellInfo.ProcCharges;
-
-        if (spellInfo.HasAttribute(SPELL_ATTR3_CAN_PROC_FROM_PROCS) && !procEntry.SpellFamilyMask
-            && procEntry.Chance >= 100
-            && spellInfo.ProcBasePPM <= 0.0f
-            && procEntry.Cooldown <= 0ms
-            && procEntry.Charges <= 0
-            && procEntry.ProcFlags & (PROC_FLAG_DEAL_MELEE_ABILITY | PROC_FLAG_DEAL_RANGED_ATTACK | PROC_FLAG_DEAL_RANGED_ABILITY | PROC_FLAG_DEAL_HELPFUL_ABILITY
-                | PROC_FLAG_DEAL_HARMFUL_ABILITY | PROC_FLAG_DEAL_HELPFUL_SPELL | PROC_FLAG_DEAL_HARMFUL_SPELL | PROC_FLAG_DEAL_HARMFUL_PERIODIC
-                | PROC_FLAG_DEAL_HELPFUL_PERIODIC)
-            && triggersSpell)
-        {
-            TC_LOG_ERROR("sql.sql", "Spell Id {} has SPELL_ATTR3_CAN_PROC_FROM_PROCS attribute and no restriction on what spells can cause it to proc and no cooldown. "
-                "This spell can cause infinite proc loops. Proc data for this spell was not generated, data in `spell_proc` table is required for it to function!",
-                spellInfo.Id);
-            continue;
-        }
-
-        generatedSpellProcMap[{ spellInfo.Id, spellInfo.Difficulty }] = procEntry;
-        ++count;
     }
 
     mSpellProcMap.merge(generatedSpellProcMap);
@@ -3182,6 +3218,7 @@ void SpellMgr::LoadSpellInfoCustomAttributes()
                 case SPELL_EFFECT_CHARGE_DEST:
                 case SPELL_EFFECT_JUMP:
                 case SPELL_EFFECT_JUMP_DEST:
+                case SPELL_EFFECT_JUMP_DEST_3:
                 case SPELL_EFFECT_LEAP_BACK:
                     spellInfoMutable->AttributesCu |= SPELL_ATTR0_CU_CHARGE;
                     break;
@@ -3325,6 +3362,16 @@ void SpellMgr::LoadSpellInfoCustomAttributes()
             // Roar
             if (spellInfoMutable->SpellFamilyFlags[0] & 0x8)
                 spellInfoMutable->AttributesCu |= SPELL_ATTR0_CU_AURA_CC;
+            // Classic 1.60: Shred (0x8000), Ravage (0x10000) and Pounce (0x20000) "Must be behind the target" (client tooltips). The client
+            // data carries no flag for it and the client does not check it, so Shred landed from any side (Discord 6_1_8_8_1, 0.1.36).
+            if (spellInfoMutable->SpellFamilyFlags[0] & 0x38000)
+                spellInfoMutable->AttributesCu |= SPELL_ATTR0_CU_REQ_CASTER_BEHIND_TARGET;
+            break;
+        case SPELLFAMILY_ROGUE:
+            // Classic 1.60: Backstab (0x4), Garrote (0x100) and Ambush (0x200), every rank and the Forever twins: "Must be behind the target"
+            // / "Must be stealthed and behind the target" (client tooltips), not flagged in the client data either.
+            if (spellInfoMutable->SpellFamilyFlags[0] & 0x304)
+                spellInfoMutable->AttributesCu |= SPELL_ATTR0_CU_REQ_CASTER_BEHIND_TARGET;
             break;
         case SPELLFAMILY_GENERIC:
             // Stoneclaw Totem effect
@@ -3721,6 +3768,60 @@ ClassicSpellValue::Cost const* SpellMgr::GetClassicSpellCost(uint32 spellId) con
     return Trinity::Containers::MapGetValuePtr(mClassicSpellCosts, spellId);
 }
 
+// Forever.VanillaAoE = 1: the vanilla Consecration and Improved Blizzard (ClassicVanillaAoe.h). The spell scripts do the
+// damage and the chill; here the client gets the same numbers for its tooltips. Only the client's copy of these rows changes: the
+// server's spells were built from the DB2 before this runs, and the talent curve is read from DB2Manager's own copy.
+// - Consecration tick effect 0 shows the vanilla tick (rank 1: 8 a tick, "64 Holy damage over 8 sec"), effect 1 shows 0.
+// - The five SpellPower rows are sent unchanged, so a client holding Blizzard's live cache (73 mana for rank 1) shows the 135 the
+//   server charges.
+// - Improved Blizzard curve 83071 shows 30 / 50 / 65%.
+void SpellMgr::LoadForeverVanillaAoe()
+{
+    if (!sWorld->getBoolConfig(CONFIG_FOREVER_VANILLA_AOE))
+        return;
+
+    uint32 sent = 0;
+    for (ClassicVanillaAoe::ConsecrationRank const& rank : ClassicVanillaAoe::ConsecrationRanks)
+    {
+        if (SpellEffectEntry const* effect = sSpellEffectStore.LookupEntry(rank.TickEffect0Id))
+        {
+            const_cast<SpellEffectEntry*>(effect)->EffectBasePoints = float(rank.VanillaTick);
+            DB2HotfixGeneratorBase::AddClientHotfix(sSpellEffectStore.GetTableHash(), effect->ID);
+            ++sent;
+        }
+
+        if (SpellEffectEntry const* effect = sSpellEffectStore.LookupEntry(rank.TickEffect1Id))
+        {
+            const_cast<SpellEffectEntry*>(effect)->EffectBasePoints = 0.0f;
+            DB2HotfixGeneratorBase::AddClientHotfix(sSpellEffectStore.GetTableHash(), effect->ID);
+            ++sent;
+        }
+
+        if (SpellInfo const* spellInfo = GetSpellInfo(rank.RankSpell, DIFFICULTY_NONE))
+        {
+            for (SpellPowerEntry const* power : spellInfo->PowerCosts)
+            {
+                if (!power)
+                    continue;
+                DB2HotfixGeneratorBase::AddClientHotfix(sSpellPowerStore.GetTableHash(), power->ID);
+                ++sent;
+            }
+        }
+    }
+
+    for (std::size_t i = 0; i < std::size(ClassicVanillaAoe::ImprovedBlizzardCurvePoints); ++i)
+    {
+        if (CurvePointEntry const* point = sCurvePointStore.LookupEntry(ClassicVanillaAoe::ImprovedBlizzardCurvePoints[i]))
+        {
+            const_cast<CurvePointEntry*>(point)->Pos.Y = float(ClassicVanillaAoe::ImprovedBlizzardVanilla[i]);
+            DB2HotfixGeneratorBase::AddClientHotfix(sCurvePointStore.GetTableHash(), point->ID);
+            ++sent;
+        }
+    }
+
+    TC_LOG_INFO("server.loading", ">> Forever.VanillaAoE = 1: vanilla Consecration and Improved Blizzard ({} client rows sent)", sent);
+}
+
 // Classic 1.60 (Forever): the bundles a labeled Waylaid Crate takes. The client lists them only in the Stock Crate spell's text
 // ("$M3 Peacebloom ...") with the counts in its dummy effects, and offers the materials of its ItemSalvage list; the server needs
 // the pairs, so classic_crate_bundle holds them (one row per material, made from the client data).
@@ -3861,11 +3962,75 @@ void SpellMgr::LoadSpellInfoCorrections()
         spellInfo->Attributes |= SPELL_ATTR0_ALLOW_WHILE_MOUNTED;
     });
 
+    // Forever Skyborne racial buffs Elemental Blessing (Skysight) and Energized (Read Ley Line): next to an Elemental Convergence or a
+    // ley line the buff is doubled (classic_spell_skyborne_racial_focus), so the aura sends its real amounts; without them the client
+    // tooltip showed the single 15% / 50% from the client data
+    ApplySpellFix({ 1259688, 1270842 }, [](SpellInfo* spellInfo)
+    {
+        spellInfo->AttributesEx8 |= SPELL_ATTR8_AURA_POINTS_ON_CLIENT;
+    });
+
     // Classic 1.60 Hoof-Shaped Foot Pedal (item 269902): the centaur form ends on entering combat only outside Desolace, which its
     // script (classic_spell_hoof_shaped_foot_pedal) does; the interrupt in the client data would end it in Desolace too.
     ApplySpellFix({ 1286814 }, [](SpellInfo* spellInfo)
     {
         spellInfo->AuraInterruptFlags &= ~SpellAuraInterruptFlags::EnteringCombat;
+    });
+
+    // Classic 1.60 world buffs: the client's spells are dummy auras that only carry the numbers; live puts the effect on a hidden copy
+    // (Rallying Cry 1304452, Warchief's Blessing 1304594, Slip'kik's Savvy 1304751). Each dummy effect becomes the aura the copy has.
+    // Rallying Cry of the Dragonslayer: crit chance of all spells and attacks, attack power, ranged attack power, spell damage, healing
+    ApplySpellFix({ 22888 }, [](SpellInfo* spellInfo)
+    {
+        ApplySpellEffectFix(spellInfo, EFFECT_0, [](SpellEffectInfo* spellEffectInfo)
+        {
+            spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_CRIT_PCT;
+        });
+        ApplySpellEffectFix(spellInfo, EFFECT_1, [](SpellEffectInfo* spellEffectInfo)
+        {
+            spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_ATTACK_POWER;
+        });
+        ApplySpellEffectFix(spellInfo, EFFECT_2, [](SpellEffectInfo* spellEffectInfo)
+        {
+            spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_RANGED_ATTACK_POWER;
+        });
+        ApplySpellEffectFix(spellInfo, EFFECT_3, [](SpellEffectInfo* spellEffectInfo)
+        {
+            spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_DAMAGE_DONE;
+            spellEffectInfo->MiscValue = SPELL_SCHOOL_MASK_MAGIC;
+        });
+        ApplySpellEffectFix(spellInfo, EFFECT_4, [](SpellEffectInfo* spellEffectInfo)
+        {
+            spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_HEALING_DONE;
+            spellEffectInfo->MiscValue = SPELL_SCHOOL_MASK_MAGIC;
+        });
+    });
+
+    // Warchief's Blessing: health, 15% haste to all spells and attacks (live's copy: melee and ranged haste plus cast speed), mana per 5 sec
+    ApplySpellFix({ 16609 }, [](SpellInfo* spellInfo)
+    {
+        ApplySpellEffectFix(spellInfo, EFFECT_0, [](SpellEffectInfo* spellEffectInfo)
+        {
+            spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_INCREASE_HEALTH;
+        });
+        ApplySpellEffectFix(spellInfo, EFFECT_1, [](SpellEffectInfo* spellEffectInfo)
+        {
+            spellEffectInfo->ApplyAuraName = SPELL_AURA_MELEE_SLOW;
+        });
+        ApplySpellEffectFix(spellInfo, EFFECT_2, [](SpellEffectInfo* spellEffectInfo)
+        {
+            spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_POWER_REGEN;
+            spellEffectInfo->MiscValue = POWER_MANA;
+        });
+    });
+
+    // Slip'kik's Savvy: crit chance of all spells and attacks
+    ApplySpellFix({ 22820 }, [](SpellInfo* spellInfo)
+    {
+        ApplySpellEffectFix(spellInfo, EFFECT_0, [](SpellEffectInfo* spellEffectInfo)
+        {
+            spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_CRIT_PCT;
+        });
     });
 
     // Classic 1.60 warrior Deep Wounds: the bleed tick (412613) never misses, never crits and ignores armor
@@ -4186,6 +4351,39 @@ void SpellMgr::LoadSpellInfoCorrections()
             spellEffectInfo->ApplyAuraName = SPELL_AURA_SCHOOL_ABSORB_OVERKILL;
             spellEffectInfo->MiscValue = SPELL_SCHOOL_MASK_ALL;
         });
+    });
+
+    // Classic 1.60: two Dire Maul / Felwood world buffs are dummy auras in the client data, so they gave nothing (naxx_patchwerk 1116 run 7:
+    // both on every tank, the tanks at 10.9k, the stamina and health of the other buffs adding up exactly without them).
+    // Mol'dar's Moxie (22818): stamina increased by 15% (the dummy's misc value is the stat, 2 = stamina).
+    ApplySpellFix({ 22818 }, [](SpellInfo* spellInfo)
+    {
+        ApplySpellEffectFix(spellInfo, EFFECT_0, [](SpellEffectInfo* spellEffectInfo)
+        {
+            if (spellEffectInfo->ApplyAuraName != SPELL_AURA_DUMMY || spellEffectInfo->MiscValue != STAT_STAMINA)
+                return;
+            spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_TOTAL_STAT_PERCENTAGE;
+            spellEffectInfo->MiscValueB = 1 << STAT_STAMINA;
+        });
+    });
+
+    // Songflower Serenade (15366): 5% critical strike chance and 15 to all stats. Told apart by their amounts, not by their order.
+    ApplySpellFix({ 15366 }, [](SpellInfo* spellInfo)
+    {
+        auto const fix = [](SpellEffectInfo* spellEffectInfo)
+        {
+            if (spellEffectInfo->ApplyAuraName != SPELL_AURA_DUMMY)
+                return;
+            if (std::lround(spellEffectInfo->BasePoints) == 5)
+                spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_CRIT_PCT;
+            else if (std::lround(spellEffectInfo->BasePoints) == 15)
+            {
+                spellEffectInfo->ApplyAuraName = SPELL_AURA_MOD_STAT;
+                spellEffectInfo->MiscValue = -1;   // all stats
+            }
+        };
+        ApplySpellEffectFix(spellInfo, EFFECT_0, fix);
+        ApplySpellEffectFix(spellInfo, EFFECT_1, fix);
     });
 
     // Parasitic Shadowfiend Passive
@@ -5721,6 +5919,7 @@ void SpellMgr::LoadSpellInfoCorrections()
                 case SPELL_EFFECT_CHARGE_DEST:
                 case SPELL_EFFECT_JUMP:
                 case SPELL_EFFECT_JUMP_DEST:
+                case SPELL_EFFECT_JUMP_DEST_3:
                 case SPELL_EFFECT_LEAP_BACK:
                     if (!spellInfo->Speed && !spellInfo->SpellFamilyName && !spellInfo->HasAttribute(SPELL_ATTR9_MISSILE_SPEED_IS_DELAY_IN_SEC))
                         spellInfo->Speed = SPEED_CHARGE;

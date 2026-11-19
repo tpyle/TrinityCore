@@ -1183,16 +1183,6 @@ struct CreatureModelDataEntry
 
     EnumFlag<CreatureModelDataFlags> GetFlags() const { return static_cast<CreatureModelDataFlags>(Flags); }
 
-    // Classic 1.60 client data: 67 models (142 displays, for example the Deviate Creeper's) carry -20000000 in CollisionHeight and
-    // CollisionWidth, a "not set" mark the client fills from the model's own bounds. Taken as a height it put those creatures' head
-    // 14 million yards under the ground, so nothing could see them (bots 0.1 y from a Deviate Creeper read "out of line of sight",
-    // Discord 2026-11-09). The top of the model's bounding box (GeoBox[5]) is the height then; 0 when that is not above the feet.
-    float GetCollisionHeight() const
-    {
-        if (CollisionHeight >= 0.0f)
-            return CollisionHeight;
-        return GeoBox[5] > 0.0f ? GeoBox[5] : 0.0f;
-    }
 };
 
 struct CreatureTypeEntry
@@ -3048,6 +3038,11 @@ struct MapDifficultyEntry
             return 86400;
         if (ResetInterval == MAP_DIFFICULTY_RESET_WEEKLY)
             return 604800;
+        if (ResetInterval == MAP_DIFFICULTY_RESET_THREE_DAYS)
+            return 3 * 86400;
+        if (ResetInterval == MAP_DIFFICULTY_RESET_FIVE_DAYS)
+            return 5 * 86400;
+        // Twice-weekly boundaries alternate between three and four calendar days.
         return 0;
     }
 

@@ -268,7 +268,7 @@ NonDefaultConstructible<SpellEffectHandlerFn> SpellEffectHandlers[TOTAL_SPELL_EF
     &Spell::EffectResurrectWithAura,                        //172 SPELL_EFFECT_RESURRECT_WITH_AURA
     &Spell::EffectUnlockGuildVaultTab,                      //173 SPELL_EFFECT_UNLOCK_GUILD_VAULT_TAB
     &Spell::EffectApplyAura,                                //174 SPELL_EFFECT_APPLY_AURA_ON_PET
-    &Spell::EffectNULL,                                     //175 SPELL_EFFECT_175
+    &Spell::EffectJumpDest,                                 //175 SPELL_EFFECT_JUMP_DEST_3
     &Spell::EffectSanctuary,                                //176 SPELL_EFFECT_SANCTUARY_2
     &Spell::EffectNULL,                                     //177 SPELL_EFFECT_DESPAWN_PERSISTENT_AREA_AURA
     &Spell::EffectUnused,                                   //178 SPELL_EFFECT_178 unused
@@ -2368,6 +2368,15 @@ void Spell::EffectPickPocket()
         const uint32 a = urand(0, creature->GetLevel() / 2);
         const uint32 b = urand(0, player->GetLevel() / 2);
         creature->m_loot->gold = uint32(10 * (a + b) * sWorld->getRate(RATE_DROP_MONEY));
+
+        // Empty pockets (no item rolled and no money: often at low level, where both money rolls can be 0 and the Tirisfal Scarlets'
+        // item chances add up to about 28%): an empty loot opens no window on the client, so the rogue saw nothing happen and the next
+        // try said "already pickpocketed" (Discord 11-16). Say there is no loot instead; the pockets stay picked until the refill.
+        if (creature->m_loot->isLooted())
+        {
+            player->SendLootError(creature->m_loot->GetGUID(), creature->GetGUID(), LOOT_ERROR_NO_LOOT);
+            return;
+        }
     }
     else if (creature->m_loot)
     {
@@ -3218,6 +3227,16 @@ void Spell::EffectScriptEffect()
                     // Onyxia Scale Cloak
                     if (unitTarget->HasAura(22683))
                         return;
+
+                    // A player wearing the cloak without its aura is burnt here: say so, with what the aura's absence comes with
+                    // (BWL Nefarian, dev realm 2026-11-13: cloaked raiders died of the burn).
+                    if (Player* playerTarget = unitTarget->ToPlayer())
+                    {
+                        Item const* back = playerTarget->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_BACK);
+                        if (back && back->GetEntry() == 15138)
+                            TC_LOG_ERROR("spells", "Shadow Flame {}: {} wears the Onyxia Scale Cloak {} (broken {}, {} item effects) without its aura 22683: burnt",
+                                m_spellInfo->Id, playerTarget->GetName(), back->GetGUID().ToString(), back->IsBroken(), back->GetEffects().size());
+                    }
 
                     // Shadow Flame
                     m_caster->CastSpell(unitTarget, 22682, this);
@@ -4100,6 +4119,9 @@ void Spell::EffectCharge()
             Position pos = unitTarget->GetFirstCollisionPosition(unitTarget->GetCombatReach(), unitTarget->GetRelativeAngle(m_caster));
 
             m_preGeneratedPath = std::make_unique<PathGenerator>(unitCaster);
+            m_preGeneratedPath->SetSlopeCoefficient(0.0f);  // shortest way, as in Spell::CheckCast for charges
+            m_preGeneratedPath->SetDisableRoadBonus(true);
+            m_preGeneratedPath->SetIgnoreLiquidRouteCheck(true);  // straight at the target, a bot's liquid avoidance aside
             m_preGeneratedPath->CalculatePath(pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), false);
         }
 
@@ -4460,7 +4482,7 @@ void Spell::EffectResurrectPet()
     {
         // In case the pet was at stay, we don't want it running back
         ci->SaveStayPosition();
-        ci->SetIsAtStay(ci->HasCommandState(COMMAND_STAY));
+        ci->SetIsAtStay(ci->HasStayCommand());
 
         ci->SetIsFollowing(false);
         ci->SetIsCommandAttack(false);

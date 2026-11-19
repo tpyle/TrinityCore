@@ -40,6 +40,7 @@
 #include "SpellMgr.h"
 #include "SpellPackets.h"
 #include "Unit.h"
+#include "ClassicPetAttackSpeed.h"
 #include "Util.h"
 #include "World.h"
 #include "WorldSession.h"
@@ -808,7 +809,7 @@ bool Pet::CatchUpWithOwner()
         return false;
     if (owner->IsInFlight() || owner->IsBeingTeleported() || owner->IsPetNeedBeTemporaryUnsummoned())
         return false;
-    if (GetCharmInfo() && GetCharmInfo()->HasCommandState(COMMAND_STAY))
+    if (GetCharmInfo() && GetCharmInfo()->HasStayCommand())
         return false;                                       // told to stay there: dismissed as before
 
     // A fight it was left at stays behind, or the pet would run straight back to it and drop out of sight again.
@@ -827,7 +828,7 @@ bool Pet::ParkForOwnerTravel()
     Player* owner = GetOwner();
     if (!owner || !owner->IsInWorld() || !owner->IsAlive() || !IsInWorld() || !IsAlive() || m_removed || isPossessed() || isTemporarySummoned())
         return false;
-    if (GetCharmInfo() && GetCharmInfo()->HasCommandState(COMMAND_STAY))
+    if (GetCharmInfo() && GetCharmInfo()->HasStayCommand())
         return false;                                       // told to stay there: dismissed as before
     if (owner->GetMap() != GetMap())
         return false;
@@ -1378,9 +1379,10 @@ bool Guardian::InitStatsForLevel(uint8 petlevel)
 
     SetStatFlatModifier(UNIT_MOD_ARMOR, BASE_VALUE, float(petlevel * 50));
 
-    // Classic 1.60 (vanilla): pets keep their creature's attack speed (a tamed beast keeps the speed it had in the wild);
-    // retail forced 2.0 sec
-    uint32 const attackTime = cinfo->BaseAttackTime ? cinfo->BaseAttackTime : BASE_ATTACK_TIME;
+    // Classic 1.60: a hunter pet swings at 2.0 sec and keeps the speed it had in the wild through its Faster / Slower Attack passive
+    // (ClassicPetAttackSpeed.h, learned in LearnPetPassives); other pets keep their creature's attack speed
+    uint32 const attackTime = petType == HUNTER_PET ? ClassicPetAttackSpeed::BaseAttackTimeMs
+                            : cinfo->BaseAttackTime ? cinfo->BaseAttackTime : BASE_ATTACK_TIME;
     SetBaseAttackTime(BASE_ATTACK, attackTime);
     SetBaseAttackTime(OFF_ATTACK, attackTime);
     SetBaseAttackTime(RANGED_ATTACK, cinfo->RangeAttackTime ? cinfo->RangeAttackTime : BASE_ATTACK_TIME);
@@ -1611,7 +1613,7 @@ bool Guardian::InitStatsForLevel(uint8 petlevel)
 
 bool Pet::HaveInDiet(ItemTemplate const* item) const
 {
-    if (!item->FoodType)
+    if (!item->FoodType || item->FoodType > 32)   // one bit of CreatureFamily.PetFoodMask per type
         return false;
 
     CreatureTemplate const* cInfo = GetCreatureTemplate();
@@ -1623,7 +1625,7 @@ bool Pet::HaveInDiet(ItemTemplate const* item) const
         return false;
 
     uint32 diet = cFamily->PetFoodMask;
-    uint32 FoodMask = 1 << (item->FoodType-1);
+    uint32 FoodMask = 1u << (item->FoodType - 1);
     return (diet & FoodMask) != 0;
 }
 
@@ -2259,6 +2261,11 @@ void Pet::LearnPetPassives()
         for (uint32 spellId : petStore->second)
             addSpell(spellId, ACT_DECIDE, PETSPELL_NEW, PETSPELL_FAMILY);
     }
+
+    // Classic 1.60: the passive that gives a hunter pet (2.0 sec swing) the attack speed its beast has in the wild
+    if (getPetType() == HUNTER_PET)
+        if (ClassicPetAttackSpeed::Step const* step = ClassicPetAttackSpeed::ForWildAttackTime(cInfo->BaseAttackTime))
+            addSpell(step->spellId, ACT_DECIDE, PETSPELL_NEW, PETSPELL_FAMILY);
 }
 
 void Pet::CastPetAuras(bool current)

@@ -347,6 +347,21 @@ ChatMessageResult WorldSession::HandleChatMessage(ChatMsg type, Language lang, s
                 (HasPermission(rbac::RBAC_PERM_CAN_FILTER_WHISPERS) && !sender->isAcceptWhispers() && !sender->IsInWhisperWhiteList(receiver->GetGUID())))
                 sender->AddWhisperWhiteList(receiver->GetGUID());
 
+            // The solo trade addon uses a self-whisper as its request transport.
+            // Dispatch it privately before Whisper() can emit a GM conversation invite.
+            if (receiver == sender && msg.starts_with("FBTrade ") && msg.size() < 140)
+            {
+                size_t split = msg.find(' ', 8);
+                if (split > 8 && split <= 16 && msg.find_first_not_of("0123456789abcdef", 8) == split)
+                {
+                    std::string_view payload = std::string_view(msg).substr(split + 1);
+                    if (payload == "view" || (!payload.empty() && payload.find_first_not_of("0123456789:") == std::string_view::npos))
+                    {
+                        sScriptMgr->OnPlayerChatSent(sender, type, lang, msg, receiver);
+                        break;
+                    }
+                }
+            }
             GetPlayer()->Whisper(msg, lang, receiver);
             sScriptMgr->OnPlayerChatSent(GetPlayer(), type, lang, msg, receiver);
             break;
@@ -532,7 +547,7 @@ void WorldSession::HandleChatAddonMessage(ChatMsg type, std::string prefix, std:
         return;
 
     // the ForeverBots add-on's own messages: say why one is dropped (see HandleChatAddonMessageTargetedOpcode)
-    bool const ownAddon = prefix == "PBC" || prefix == "FBOTS";
+    bool const ownAddon = prefix == "PBC" || prefix == "FBOTS" || prefix == Player::CombatNameplatePrefix;
 
     // Disabled addon channel?
     if (!sWorld->getBoolConfig(CONFIG_ADDON_CHANNEL))
@@ -550,6 +565,49 @@ void WorldSession::HandleChatAddonMessage(ChatMsg type, std::string prefix, std:
     }
 
     sender->UpdateSpeakTime(Player::ChatFloodThrottle::ADDON);
+
+    if (prefix == Player::CombatNameplatePrefix)
+    {
+        // This protocol is local to the sender, including when a grouped
+        // Classic client uses its group distribution instead of a self whisper.
+        if (GetClientBuild() < 70532 || (text != "ON" && text != "OFF") ||
+            std::find(_registeredAddonPrefixes.begin(), _registeredAddonPrefixes.end(), prefix) == _registeredAddonPrefixes.end())
+        {
+            TC_LOG_INFO("server.combatplates", "[combat_plates] {}: '{}' dropped: build {}, prefix registered {} ({} prefixes registered)", GetPlayerInfo(),
+                text.substr(0, 16), GetClientBuild(), advstd::ranges::contains(_registeredAddonPrefixes, prefix), _registeredAddonPrefixes.size());
+            return;
+        }
+
+        if (type == CHAT_MSG_WHISPER)
+        {
+            if (targetGuid && !targetGuid->IsEmpty())
+            {
+                if (*targetGuid != sender->GetGUID())
+                {
+                    TC_LOG_INFO("server.combatplates", "[combat_plates] {}: dropped, whisper target {} is not the sender", GetPlayerInfo(), targetGuid->ToString());
+                    return;
+                }
+            }
+            else
+            {
+                ExtendedPlayerName name = ExtractExtendedPlayerName(target);
+                if (!normalizePlayerName(name.Name) || name.Name != sender->GetName())
+                {
+                    TC_LOG_INFO("server.combatplates", "[combat_plates] {}: dropped, whisper target '{}' is not the sender", GetPlayerInfo(), target);
+                    return;
+                }
+            }
+        }
+        else if (type != CHAT_MSG_PARTY && type != CHAT_MSG_RAID && type != CHAT_MSG_INSTANCE_CHAT)
+        {
+            TC_LOG_INFO("server.combatplates", "[combat_plates] {}: dropped, chat type {}", GetPlayerInfo(), uint32(type));
+            return;
+        }
+
+        TC_LOG_INFO("server.combatplates", "[combat_plates] {}: request {} (chat type {})", GetPlayerInfo(), text, uint32(type));
+        sender->RequestCombatNameplates(text == "ON", true);
+        return;
+    }
 
     if (prefix == AddonChannelCommandHandler::PREFIX && AddonChannelCommandHandler(this).ParseCommands(text.c_str()))
         return;

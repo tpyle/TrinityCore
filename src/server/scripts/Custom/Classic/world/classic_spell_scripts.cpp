@@ -22,6 +22,7 @@
 #include "AreaTrigger.h"
 #include "CellImpl.h"
 #include "ClassicLegacyPerks.h"
+#include "ClassicVanillaAoe.h"
 #include "Creature.h"
 #include "CreatureAI.h"
 #include "ConditionMgr.h"
@@ -49,6 +50,7 @@
 #include "SpellScript.h"
 #include "ThreatManager.h"
 #include "Unit.h"
+#include "World.h"
 #include "WorldSession.h"
 #include <mutex>
 #include <unordered_map>
@@ -421,8 +423,11 @@ class classic_spell_pal_judgement_of_command : public SpellScript
 
 // 5373, 1826 - Judgement of Light / Judgement of Wisdom "Intermediate": the judgement debuff (20185, 20186 and their ranks) procs this dummy
 // from the judged enemy at whoever hits it, and nothing turned it into the heal or the mana (the client spell does neither itself). The rank's
-// own spell (20267 / 20341-20343 heal, 20268 / 20352-20353 mana) is cast by the paladin that judged, so its talents (Improved Judgement of
-// Light) and healing modifiers apply; the vanilla amounts are in those spells.
+// own spell (20267 / 20341-20343 heal, 20268 / 20352-20353 mana) targets its own caster (ImplicitTarget 1), so the attacker casts it on
+// itself, with the paladin that judged as the original caster for credit. The client gives those spells no class mask and no bonus
+// coefficient, so no talent or healing modifier of the paladin's could change them; the vanilla amounts are in those spells. A proc
+// cast never sets the original caster, so GetOriginalCaster() here is the judged enemy itself: the old code had it cast the
+// self-targeted heal / mana, which went to the enemy (Discord, dumpins 2026-11-17).
 class classic_spell_pal_judgement_intermediate : public SpellScript
 {
     static uint32 GetRankSpell(bool light, uint32 debuffId)
@@ -466,10 +471,9 @@ class classic_spell_pal_judgement_intermediate : public SpellScript
             if (!rankSpell)
                 continue;
 
-            Unit* paladin = GetOriginalCaster();
-            if (!paladin)
-                paladin = aurApp->GetBase()->GetCaster();
-            (paladin ? paladin : judged)->CastSpell(attacker, rankSpell, CastSpellExtraArgs(TRIGGERED_FULL_MASK).SetTriggeringSpell(GetSpell()));
+            attacker->CastSpell(attacker, rankSpell, CastSpellExtraArgs(TRIGGERED_FULL_MASK)
+                .SetOriginalCaster(aurApp->GetBase()->GetCasterGUID())
+                .SetTriggeringSpell(GetSpell()));
             break;
         }
     }
@@ -1530,19 +1534,13 @@ class classic_spell_pal_judgement_of_fury : public SpellScript
 // 26573, 20116, 20922, 20923, 20924 - Consecration (Classic 1.60, official dungeon sniff): the cast puts a 1 sec periodic dummy on the
 // paladin for 8 sec and creates area trigger 41311-41316 at his feet (no data on our server); each tick the official server casts the
 // rank's Consecration damage (1280345-1280349) at the consecrated spot, hitting the enemies standing in it.
+// Forever.VanillaAoE = 1: each tick does the vanilla damage instead (ClassicVanillaAoe.h): effect 0 for 0, effect 1 (the one with
+// the spell power) for the vanilla tick, on every enemy in it.
 class classic_spell_pal_consecration : public AuraScript
 {
     static uint32 TickSpell(uint32 spellId)
     {
-        switch (spellId)
-        {
-            case 26573: return 1280345;
-            case 20116: return 1280346;
-            case 20922: return 1280347;
-            case 20923: return 1280348;
-            case 20924: return 1280349;
-            default:    return 0;
-        }
+        return ClassicVanillaAoe::ConsecrationTickSpell(spellId);
     }
 
     bool Validate(SpellInfo const* spellInfo) override
@@ -1559,7 +1557,16 @@ class classic_spell_pal_consecration : public AuraScript
     {
         PreventDefaultAction();
         Unit* paladin = GetUnitOwner();
-        paladin->CastSpell(_center, TickSpell(GetId()), CastSpellExtraArgs(aurEff));
+        CastSpellExtraArgs args(aurEff);
+        if (sWorld->getBoolConfig(CONFIG_FOREVER_VANILLA_AOE))
+        {
+            if (ClassicVanillaAoe::ConsecrationRank const* rank = ClassicVanillaAoe::FindConsecrationRank(GetId()))
+            {
+                args.AddSpellMod(SPELLVALUE_BASE_POINT0, 0);
+                args.AddSpellMod(SPELLVALUE_BASE_POINT1, rank->VanillaTick);
+            }
+        }
+        paladin->CastSpell(_center, TickSpell(GetId()), args);
     }
 
     void Register() override
@@ -1864,8 +1871,9 @@ class classic_spell_warr_gore_drinker_enrage : public AuraScript
 ## classic_spell_undead_touch_of_the_grave
 ######*/
 
-// 1260189 - Touch of the Grave (Undead racial, 1.60): "Your spells and attacks have a chance to drain Health from the target, up to
-// $s1% of your maximum Health." The client data procs a dummy aura (20%, 25 sec recovery) and has no trigger for the drain
+// 1260189 / 1260201 - Touch of the Grave (Undead racial, 1.60): "Your spells and attacks have a chance to drain Health from the target,
+// up to $s1% of your maximum Health." Warriors, paladins and rogues learn 1260189 (20%), priests, mages and warlocks learn 1260201 (30%)
+// (SkillLineAbility class masks 11 and 400). The client data procs a dummy aura (15 sec recovery) and has no trigger for the drain
 // 1260198, whose health leech base points are a placeholder 5: the drain is cast here for $s1% of the Undead's maximum health.
 class classic_spell_undead_touch_of_the_grave : public AuraScript
 {
@@ -2168,17 +2176,27 @@ class classic_spell_shadow_storm_min_range : public SpellScript
 // 1258773 - Testing the Wells (Forever quest 92742, Westfall): the Well Testing Kit 254545 casts a dummy on a "nearby entry" target that
 // nothing in the data names, so every use failed with an invalid target and the two water samples could never be had (Discord
 // 2026-11-09). The target is the caster now (SpellMgr::LoadSpellInfoCorrections); next to a well the kit gives that well's sample.
-// Wells: the players' map spots 56.5,18.8 (Furlbrow's Pumpkin Farm) and 46.0,38.3 (the Molsen Farm), turned into world spots with
-// Gryan Stoutmantle and Salma Saldean as fit points; the 25 yd radius covers the guess.
+// Well spots: the objective points of the quest data (ATT Forever, Westfall 56.7,18.7 Jansen Stead and 46.2,38.3 Molsen Farm) through
+// the Westfall map frame fitted on 44 of our spawns (0.6% median error, about 20 yards). The first version fitted the map on two NPCs
+// only: its Jansen Stead well sat 35 yards from this one (Molsen 16), more than its 25 yard reach, and the kit was reported broken
+// again (Discord, voldemargreed "bugs 3", 2026-11-13). INFERRED: the live well bunnies were never sniffed; 35 yards covers the fit.
 class classic_spell_quest_testing_the_wells : public SpellScript
 {
     struct Well { float x, y; uint32 sample; };
     static constexpr Well WELLS[] =
     {
-        { -9839.2f, 1038.2f, 254546 },
-        { -10294.1f, 1405.4f, 254547 },
+        { -9809.3f, 1020.8f, 254546 },      // Jansen Stead
+        { -10279.7f, 1398.3f, 254547 },     // Molsen Farm
     };
-    static constexpr float WELL_RADIUS = 25.0f;
+    static constexpr float WELL_RADIUS = 35.0f;
+
+    bool Validate(SpellInfo const* /*spellInfo*/) override
+    {
+        for (Well const& well : WELLS)
+            if (!sObjectMgr->GetItemTemplate(well.sample))
+                return false;
+        return true;
+    }
 
     Well const* NearestWell() const
     {
@@ -2193,7 +2211,15 @@ class classic_spell_quest_testing_the_wells : public SpellScript
 
     SpellCastResult CheckWell()
     {
-        return NearestWell() ? SPELL_CAST_OK : SPELL_FAILED_NOT_HERE;
+        Player* player = GetCaster()->ToPlayer();
+        if (!player)
+            return SPELL_FAILED_DONT_REPORT;
+        Well const* well = NearestWell();
+        if (!well)
+            return SPELL_FAILED_NOT_HERE;
+        if (player->HasItemCount(well->sample, 1, true))   // this farm's sample is already in the bags or bank
+            return SPELL_FAILED_DONT_REPORT;
+        return SPELL_CAST_OK;
     }
 
     void HandleDummy(SpellEffIndex /*effIndex*/)
@@ -2202,7 +2228,7 @@ class classic_spell_quest_testing_the_wells : public SpellScript
         Well const* well = NearestWell();
         if (!player || !well)
             return;
-        if (player->GetItemCount(well->sample) == 0)
+        if (!player->HasItemCount(well->sample, 1, true))
             player->AddItem(well->sample, 1);
     }
 

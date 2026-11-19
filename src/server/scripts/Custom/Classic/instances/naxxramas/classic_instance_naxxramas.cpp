@@ -20,6 +20,7 @@
 //          toxic_tunnel_ai, dark_touched_warriorAI, mob_craftsman_omarion, spell_gargoyle_stoneform,
 //          spell_unrelenting_rider_shadow_bolt_volley
 
+#include "Log.h"
 #include "ScriptMgr.h"
 #include "ChatPackets.h"
 #include "Creature.h"
@@ -485,6 +486,15 @@ void classic_instance_naxxramas_InstanceScript::OnCreatureCreate(Creature* pCrea
                 pCreature->DespawnOrUnsummon();
             break;
         }
+        case NPC_STALAGG:
+        case NPC_FEUGEN:
+            // Thaddius's script summons both adds and their coils itself (classic_boss_thaddius.cpp CheckSpawnAdds), as VMaNGOS does; the
+            // world DB still carries a spawn row for each (guid 1592900 Stalagg, 1593000 Feugen), so the room held two of each: two
+            // Stalaggs and two Feugens on different raiders (naxx_thaddius 2026-11-14 1114c).
+            // The spawned ones go; the script's are the encounter.
+            if (!pCreature->IsSummon())
+                pCreature->DespawnOrUnsummon(0s, Seconds(7 * DAY));
+            break;
         default:
             break;
     }
@@ -1980,7 +1990,10 @@ enum OmarionMisc
     BC_CLOSE_CRAFTER      = 12270, // I need to go. Evil stirs. Die well, Omarion.
 
     GOSSIP_MENU_INTRO   = 8507,
-    GOSSIP_MENU_CRAFTER = 8508,
+    // "Perhaps I can teach you something..." (BroadcastText 12258). Classic's npc_text 8508 is another NPC's line in this world
+    // (Karrz 11-16: "I'm sure that help from Farstrider Enclave will be here soon..."), so the text has an id of its own
+    // (2026_11_16_04_world_classic_scripted_npc_texts.sql).
+    GOSSIP_MENU_CRAFTER = 91016365,
     GOSSIP_MENU_NOCRAFT = 8516,
 
     GOSSIP_OPT_NOT_CRAFTSMAN   = 1,
@@ -2032,6 +2045,9 @@ void ClassicNaxxAddGossip(Player* player, char const* text, uint32 sender, uint3
     AddGossipItemFor(player, GossipOptionNpc::None, text, sender, action);
 }
 
+// learnId is the trainer spell whose LEARN_SPELL effect teaches knowId: Classic's 28251-28263, which the Forever client has.
+// The recipe item spells used here before (28212 and the rest) are missing from that client except 28245, so the cast
+// failed and 12 of the 13 recipes could not be learned.
 void LearnCraftIfCan(uint32 learnId, uint32 knowId, Player* pPlayer, ReputationRank minRank, uint32 currSkill)
 {
     ReputationRank argentDawnRep = pPlayer->GetReputationRank(FACTION_ID_ARGENT_DAWN_NAXX);
@@ -2048,6 +2064,44 @@ void LearnCraftIfCan(uint32 learnId, uint32 knowId, Player* pPlayer, ReputationR
 
 struct classic_mob_craftsman_omarion : public ScriptedAI
 {
+    struct Pattern { uint32 action; char const* name; uint32 knowId; bool exalted; };
+
+    // The patterns of one profession (sender GOSSIP_SELECT_TAILOR / _BS / _LW), each with the recipe spell it teaches.
+    static std::vector<Pattern> const& PatternsOf(uint32 profession)
+    {
+        static std::vector<Pattern> const tailor = {
+            { GOSSIP_SELECT_GLACIAL_GLOVES, "Glacial Gloves", 28205, false }, { GOSSIP_SELECT_GLACIAL_WRISTS, "Glacial Wrists", 28209, false },
+            { GOSSIP_SELECT_GLACIAL_CHEST, "Glacial Vest", 28207, true },     { GOSSIP_SELECT_GLACIAL_CLOAK, "Glacial Cloak", 28208, true } };
+        static std::vector<Pattern> const smith = {
+            { GOSSIP_SELECT_ICEBANE_GLOVES, "Icebane Gauntlets", 28243, false }, { GOSSIP_SELECT_ICEBANE_WRISTS, "Icebane Bracers", 28244, false },
+            { GOSSIP_SELECT_ICEBANE_CHEST, "Icebane Breastplate", 28242, true } };
+        static std::vector<Pattern> const leather = {
+            { GOSSIP_SELECT_POLAR_GLOVES, "Polar Gloves", 28220, false },          { GOSSIP_SELECT_ICYSCALE_GLOVES, "Icy Scale Gauntlets", 28223, false },
+            { GOSSIP_SELECT_POLAR_WRISTS, "Polar Bracers", 28221, false },         { GOSSIP_SELECT_ICYSCALE_WRISTS, "Icy Scale Bracers", 28224, false },
+            { GOSSIP_SELECT_POLAR_CHEST, "Polar Tunic", 28219, true },             { GOSSIP_SELECT_ICYSCALE_CHEST, "Icy Scale Breastplate", 28222, true } };
+        static std::vector<Pattern> const none;
+        switch (profession)
+        {
+            case GOSSIP_SELECT_TAILOR: return tailor;
+            case GOSSIP_SELECT_BS:     return smith;
+            case GOSSIP_SELECT_LW:     return leather;
+            default:                   return none;
+        }
+    }
+
+    // One profession's page: every pattern the player's reputation allows and that they do not know yet, then "I need to go".
+    // Each line checks its own recipe, so learning one leaves the others on the page (Karrz 11-16: after Glacial Gloves the
+    // page held only "I need to go").
+    void SendPatternPage(Player* player, uint32 profession)
+    {
+        ReputationRank const rep = player->GetReputationRank(FACTION_ID_ARGENT_DAWN_NAXX);
+        for (Pattern const& p : PatternsOf(profession))
+            if (rep >= (p.exalted ? REP_EXALTED : REP_REVERED) && !player->HasSpell(p.knowId))
+                ClassicNaxxAddGossip(player, p.name, profession, p.action);
+        ClassicNaxxAddGossip(player, BC_CLOSE_CRAFTER, profession, GOSSIP_CLOSE);
+        SendGossipMenuFor(player, GOSSIP_MENU_CRAFTER, me->GetGUID());
+    }
+
     classic_mob_craftsman_omarion(Creature* creature) : ScriptedAI(creature) { }
 
     bool OnGossipHello(Player* pPlayer) override
@@ -2069,7 +2123,6 @@ struct classic_mob_craftsman_omarion : public ScriptedAI
 
         ClassicNaxxAddGossip(pPlayer, BC_NO_CRAFT_TEXT, GOSSIP_SENDER_MAIN, GOSSIP_SELECT_NOCRAFT);
 
-        // TODO(classic): npc_text 8507 / 8508 / 8516 must exist in the TC world DB (VMaNGOS npc_text ids)
         SendGossipMenuFor(pPlayer, GOSSIP_MENU_INTRO, me->GetGUID());
         me->HandleEmoteCommand(EMOTE_ONESHOT_LAUGH);
         return true;
@@ -2107,46 +2160,9 @@ struct classic_mob_craftsman_omarion : public ScriptedAI
         switch (uiAction)
         {
             case GOSSIP_SELECT_TAILOR:
-                if (argentDawnRep >= CRACT1_REQ_RANK)
-                {
-                    ClassicNaxxAddGossip(pPlayer, "Glacial Gloves", GOSSIP_SELECT_TAILOR, GOSSIP_SELECT_GLACIAL_GLOVES);
-                    ClassicNaxxAddGossip(pPlayer, "Glacial Wrists", GOSSIP_SELECT_TAILOR, GOSSIP_SELECT_GLACIAL_WRISTS);
-                }
-                if (argentDawnRep >= CRAFT2_REQ_RANK)
-                {
-                    ClassicNaxxAddGossip(pPlayer, "Glacial Vest", GOSSIP_SELECT_TAILOR, GOSSIP_SELECT_GLACIAL_CHEST);
-                    ClassicNaxxAddGossip(pPlayer, "Glacial Cloak", GOSSIP_SELECT_TAILOR, GOSSIP_SELECT_GLACIAL_CLOAK);
-                }
-                ClassicNaxxAddGossip(pPlayer, BC_CLOSE_CRAFTER, GOSSIP_SELECT_TAILOR, GOSSIP_CLOSE);
-                SendGossipMenuFor(pPlayer, GOSSIP_MENU_CRAFTER, me->GetGUID());
-                return true;
             case GOSSIP_SELECT_BS:
-                if (argentDawnRep >= CRACT1_REQ_RANK)
-                {
-                    ClassicNaxxAddGossip(pPlayer, "Icebane Gauntlets", GOSSIP_SELECT_BS, GOSSIP_SELECT_ICEBANE_GLOVES);
-                    ClassicNaxxAddGossip(pPlayer, "Icebane Bracers", GOSSIP_SELECT_BS, GOSSIP_SELECT_ICEBANE_WRISTS);
-                }
-                if (argentDawnRep >= CRAFT2_REQ_RANK)
-                    ClassicNaxxAddGossip(pPlayer, "Icebane Breastplate", GOSSIP_SELECT_BS, GOSSIP_SELECT_ICEBANE_CHEST);
-                ClassicNaxxAddGossip(pPlayer, BC_CLOSE_CRAFTER, GOSSIP_SELECT_BS, GOSSIP_CLOSE);
-                SendGossipMenuFor(pPlayer, GOSSIP_MENU_CRAFTER, me->GetGUID());
-                return true;
             case GOSSIP_SELECT_LW:
-                if (argentDawnRep >= CRACT1_REQ_RANK)
-                {
-                    ClassicNaxxAddGossip(pPlayer, "Polar Gloves", GOSSIP_SELECT_LW, GOSSIP_SELECT_POLAR_GLOVES);
-                    ClassicNaxxAddGossip(pPlayer, "Icy Scale Gauntlets", GOSSIP_SELECT_LW, GOSSIP_SELECT_ICYSCALE_GLOVES);
-
-                    ClassicNaxxAddGossip(pPlayer, "Polar Bracers", GOSSIP_SELECT_LW, GOSSIP_SELECT_POLAR_WRISTS);
-                    ClassicNaxxAddGossip(pPlayer, "Icy Scale Bracers", GOSSIP_SELECT_LW, GOSSIP_SELECT_ICYSCALE_WRISTS);
-                }
-                if (argentDawnRep >= CRAFT2_REQ_RANK)
-                {
-                    ClassicNaxxAddGossip(pPlayer, "Polar Tunic", GOSSIP_SELECT_LW, GOSSIP_SELECT_POLAR_CHEST);
-                    ClassicNaxxAddGossip(pPlayer, "Icy Scale Breastplate", GOSSIP_SELECT_LW, GOSSIP_SELECT_ICYSCALE_CHEST);
-                }
-                ClassicNaxxAddGossip(pPlayer, BC_CLOSE_CRAFTER, GOSSIP_SELECT_LW, GOSSIP_CLOSE);
-                SendGossipMenuFor(pPlayer, GOSSIP_MENU_CRAFTER, me->GetGUID());
+                SendPatternPage(pPlayer, uiAction);
                 return true;
             case GOSSIP_SELECT_NOCRAFT:
             {
@@ -2165,51 +2181,51 @@ struct classic_mob_craftsman_omarion : public ScriptedAI
             ****************************/
 
             case GOSSIP_SELECT_GLACIAL_GLOVES:
-                LearnCraftIfCan(28212, 28205, pPlayer, CRACT1_REQ_RANK, tailorSkill);
+                LearnCraftIfCan(28261, 28205, pPlayer, CRACT1_REQ_RANK, tailorSkill);
                 break;
             case GOSSIP_SELECT_GLACIAL_WRISTS:
-                LearnCraftIfCan(28215, 28209, pPlayer, CRACT1_REQ_RANK, tailorSkill);
+                LearnCraftIfCan(28262, 28209, pPlayer, CRACT1_REQ_RANK, tailorSkill);
                 break;
             case GOSSIP_SELECT_GLACIAL_CHEST:
                 // spell castbar bug, displays as "glacial gloves"
-                LearnCraftIfCan(28213, 28207, pPlayer, CRAFT2_REQ_RANK, tailorSkill);
+                LearnCraftIfCan(28260, 28207, pPlayer, CRAFT2_REQ_RANK, tailorSkill);
                 break;
             case GOSSIP_SELECT_GLACIAL_CLOAK:
-                LearnCraftIfCan(28214, 28208, pPlayer, CRAFT2_REQ_RANK, tailorSkill);
+                LearnCraftIfCan(28263, 28208, pPlayer, CRAFT2_REQ_RANK, tailorSkill);
                 break;
             case GOSSIP_SELECT_POLAR_GLOVES:
-                LearnCraftIfCan(28229, 28220, pPlayer, CRACT1_REQ_RANK, leatherworkSkill);
+                LearnCraftIfCan(28255, 28220, pPlayer, CRACT1_REQ_RANK, leatherworkSkill);
                 break;
             case GOSSIP_SELECT_POLAR_WRISTS:
-                LearnCraftIfCan(28230, 28221, pPlayer, CRACT1_REQ_RANK, leatherworkSkill);
+                LearnCraftIfCan(28256, 28221, pPlayer, CRACT1_REQ_RANK, leatherworkSkill);
                 break;
             case GOSSIP_SELECT_POLAR_CHEST:
-                LearnCraftIfCan(28228, 28219, pPlayer, CRAFT2_REQ_RANK, leatherworkSkill);
+                LearnCraftIfCan(28254, 28219, pPlayer, CRAFT2_REQ_RANK, leatherworkSkill);
                 break;
             case GOSSIP_SELECT_ICYSCALE_GLOVES:
-                LearnCraftIfCan(28232, 28223, pPlayer, CRACT1_REQ_RANK, leatherworkSkill);
+                LearnCraftIfCan(28258, 28223, pPlayer, CRACT1_REQ_RANK, leatherworkSkill);
                 break;
             case GOSSIP_SELECT_ICYSCALE_WRISTS:
-                LearnCraftIfCan(28233, 28224, pPlayer, CRACT1_REQ_RANK, leatherworkSkill);
+                LearnCraftIfCan(28259, 28224, pPlayer, CRACT1_REQ_RANK, leatherworkSkill);
                 break;
             case GOSSIP_SELECT_ICYSCALE_CHEST:
-                LearnCraftIfCan(28231, 28222, pPlayer, CRAFT2_REQ_RANK, leatherworkSkill);
+                LearnCraftIfCan(28257, 28222, pPlayer, CRAFT2_REQ_RANK, leatherworkSkill);
                 break;
             case GOSSIP_SELECT_ICEBANE_GLOVES:
-                LearnCraftIfCan(28248, 28243, pPlayer, CRACT1_REQ_RANK, blacksmithSkill);
+                LearnCraftIfCan(28253, 28243, pPlayer, CRACT1_REQ_RANK, blacksmithSkill);
                 break;
             case GOSSIP_SELECT_ICEBANE_WRISTS:
-                LearnCraftIfCan(28249, 28244, pPlayer, CRACT1_REQ_RANK, blacksmithSkill);
+                LearnCraftIfCan(28252, 28244, pPlayer, CRACT1_REQ_RANK, blacksmithSkill);
                 break;
             case GOSSIP_SELECT_ICEBANE_CHEST:
-                LearnCraftIfCan(28245, 28242, pPlayer, CRAFT2_REQ_RANK, blacksmithSkill);
+                LearnCraftIfCan(28251, 28242, pPlayer, CRAFT2_REQ_RANK, blacksmithSkill);
                 break;
             default:
                 break;
         }
 
-        ClassicNaxxAddGossip(pPlayer, BC_CLOSE_CRAFTER, uiSender, GOSSIP_CLOSE);
-        SendGossipMenuFor(pPlayer, GOSSIP_MENU_CRAFTER, me->GetGUID());
+        // Back to the same profession's page, with the pattern just learned gone from it.
+        SendPatternPage(pPlayer, uiSender);
         return true;
     }
 };

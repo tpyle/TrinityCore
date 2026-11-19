@@ -1011,8 +1011,10 @@ enum ClassicDMKnotThimblejack
     QUEST_FREE_KNOT             = 5525,
     QUEST_FREE_KNOT_REPEATABLE  = 7429,
 
-    GOSSIP_MENU_1               = 6795, // npc_text
-    GOSSIP_MENU_2               = 6883, // npc_text
+    // npc_text of his own (2026_11_16_04_world_classic_scripted_npc_texts.sql): Classic's 6795 / 6883 are not in this world,
+    // and a gossip with a missing text never opened on the client, so right-clicking him did nothing at all (Karrz 11-16).
+    GOSSIP_MENU_1               = 91014338, // "Please, please, please tell me you are here to get me out of these shackles..." (9220)
+    GOSSIP_MENU_2               = 91014339, // "Well, from what I've gathered while waiting to be eaten by these yokels..." (9369)
 
     GO_KNOTS_BALL_AND_CHAIN     = 179511
 };
@@ -1089,7 +1091,9 @@ struct classic_npc_knot_thimblejack : public ScriptedAI
 
         AddGossipItemFor(player, GossipOptionNpc::None, GOSSIP_ITEM_KNOT_WHY_TRAP, GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 1);
 
-        if (player->GetQuestRewardStatus(QUEST_GORDOK_OGRE_SUIT) && player->GetQuestStatus(QUEST_GORDOK_OGRE_SUIT) == QUEST_STATUS_COMPLETE)
+        // Once turned in, the quest's status is QUEST_STATUS_REWARDED and its entry leaves the active quest list, so it can
+        // never also read as QUEST_STATUS_COMPLETE: the reward check alone is the test.
+        if (player->GetQuestRewardStatus(QUEST_GORDOK_OGRE_SUIT))
         {
             if (player->GetBaseSkillValue(SKILL_LEATHERWORKING) >= 275 && !player->HasSpell(SPELL_GORDOK_OGRE_SUIT_L))
                 AddGossipItemFor(player, GossipOptionNpc::None, GOSSIP_ITEM_KNOT_OGRE_SUIT, GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 2);
@@ -1098,7 +1102,6 @@ struct classic_npc_knot_thimblejack : public ScriptedAI
                 AddGossipItemFor(player, GossipOptionNpc::None, GOSSIP_ITEM_KNOT_OGRE_SUIT, GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 3);
         }
 
-        // TODO(classic): npc_text 6795 / 6883 must exist in the TC world DB (VMaNGOS npc_text ids)
         SendGossipMenuFor(player, GOSSIP_MENU_1, me->GetGUID());
         return true;
     }

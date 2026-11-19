@@ -18,6 +18,7 @@
 #include "WorldSession.h"
 #include "Bag.h"
 #include "BattlePetMgr.h"
+#include "CollectionMgr.h"
 #include <algorithm>
 #include <array>
 #include "Common.h"
@@ -364,6 +365,41 @@ void WorldSession::HandleDestroyItemOpcode(WorldPackets::Item::DestroyItem& dest
         _player->DestroyItemCount(item, destroyItem.Count, true);
     else
         _player->DestroyItem(destroyItem.ContainerId, destroyItem.SlotNum, true);
+}
+
+void WorldSession::HandleAddAccountCosmetic(WorldPackets::Item::AddAccountCosmetic& packet)
+{
+    Item* item = _player->GetItemByGuid(packet.ItemGUID);
+    if (!item || item->GetOwnerGUID() != _player->GetGUID() ||
+        !Player::IsInventoryPos(item->GetBagSlot(), item->GetSlot()) || item->IsInTrade() || item->IsWrapped())
+        return;
+
+    ItemTemplate const* itemTemplate = item->GetTemplate();
+    if (!itemTemplate->HasFlag(ITEM_FLAG4_COSMETIC_ITEM) || itemTemplate->HasFlag(ITEM_FLAG4_IGNORE_COSMETIC_COLLECTION_BEHAVIOR))
+        return;
+
+    InventoryResult result = _player->CanUseItem(item);
+    if (result != EQUIP_ERR_OK)
+    {
+        _player->SendEquipError(result, item, nullptr);
+        return;
+    }
+
+    ItemModifiedAppearanceEntry const* appearance = item->GetItemModifiedAppearance();
+    if (!appearance || item->IsRefundable() || item->IsBOPTradeable())
+        return;
+
+    auto [known, temporary] = _collectionMgr->HasItemAppearance(appearance->ID);
+    if (known && !temporary)
+        return;
+
+    _collectionMgr->AddItemAppearance(item);
+    auto [learned, conditional] = _collectionMgr->HasItemAppearance(appearance->ID);
+    if (learned && !conditional)
+    {
+        uint32 count = 1;
+        _player->DestroyItemCount(item, count, true);
+    }
 }
 
 void WorldSession::HandleReadItem(WorldPackets::Item::ReadItem& readItem)
@@ -1472,6 +1508,13 @@ uint32 BagSorter::GetSlotRank(BagSortSlot const& slot, BagSortCategory category)
 
     if (slot.BagSlot == REAGENT_BAG_SLOT_START && category == BagSortCategory::Reagent)
         return 0;
+
+    // a reagent bag takes only crafting reagents (CanGoIntoSlot), and those are mostly trade goods (herbs, ore, cloth, leather),
+    // not the Reagent category: whatever fits goes there first, as on live, instead of after every other bag
+    if (Bag const* bag = _player->GetBagByPos(slot.BagSlot))
+        if (ItemTemplate const* bagProto = bag->GetTemplate())
+            if (bagProto->GetClass() == ITEM_CLASS_CONTAINER && bagProto->GetSubClass() == ITEM_SUBCLASS_REAGENT_CONTAINER)
+                return 0;
 
     if (_player->GetBagSlotFlags(slot.BagSlot - INVENTORY_SLOT_BAG_START).HasFlag(GetBagSortPriorityFlag(category)))
         return 0;

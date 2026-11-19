@@ -556,6 +556,7 @@ struct classic_boss_thaddius : public ScriptedAI
     std::random_device m_randDevice;
     std::mt19937 m_random{ m_randDevice() };
     uint32 killSayCooldown = 0;
+    uint32 m_phaseChanges = 0;
 
     // VMaNGOS does this in the AI constructor
     void JustAppeared() override
@@ -571,8 +572,12 @@ struct classic_boss_thaddius : public ScriptedAI
         if (!me->HasAura(SPELL_THADIUS_SPAWN))
             DoCastSelf(SPELL_THADIUS_SPAWN, true);
 
-        // He is not targetable other than in p2
+        // He is not targetable other than in p2 (VMaNGOS: UNIT_FLAG_NOT_SELECTABLE only). His creature row also carries UNIT_FLAG_IMMUNE_TO_PC,
+        // and that one is cleared here: a creature immune to players ends its combat with them and takes none (Unit::SetImmuneToPC,
+        // CombatManager). naxx_thaddius 1115b: he stayed immune into the transition, and while the coils overloaded he left the fight at 100%
+        // before phase 2 (the adds down with 39/40 alive, "phase 1 -> 2", then nothing). Uninteractible alone keeps every attack off him.
         me->SetUninteractible(true);
+        me->SetImmuneToPC(false);
     }
 
     // Helper for CheckSpawnAdds
@@ -704,8 +709,9 @@ struct classic_boss_thaddius : public ScriptedAI
         if (!me->HasAura(SPELL_THADIUS_SPAWN))
             DoCastSelf(SPELL_THADIUS_SPAWN, true);
 
-        // He is not targetable other than in p2
+        // He is not targetable other than in p2; not immune to players either (JustAppeared).
         me->SetUninteractible(true);
+        me->SetImmuneToPC(false);
     }
 
     void KilledUnit(Unit* pVictim) override
@@ -735,6 +741,14 @@ struct classic_boss_thaddius : public ScriptedAI
 
     void TransitionToPhase(ClassicNaxxThaddiusPhase newPhase)
     {
+        // Diagnostics: each phase change with his threat list and combat state (naxx_thaddius 2026-11-14: both adds went down together and
+        // he left combat 16 s later at 100% without engaging anybody). The first 20 changes, then every 100th, so a flip each tick shows.
+        ++m_phaseChanges;
+        if (m_phaseChanges <= 20 || m_phaseChanges % 100 == 0)
+            TC_LOG_INFO("scripts", "classic_boss_thaddius: phase {} -> {} (change {}), threat list {}, in combat {}, evading {}, uninteractible {}, "
+                        "immune to pc {}, instance data {}", uint32(m_Phase), uint32(newPhase), m_phaseChanges,
+                        me->GetThreatManager().GetThreatListSize(), me->IsInCombat(),
+                        me->IsInEvadeMode(), me->IsUninteractible(), me->IsImmuneToPC(), m_pInstance ? m_pInstance->GetData(TYPE_THADDIUS) : 0u);
         m_Phase = newPhase;
         switch (m_Phase)
         {
@@ -803,6 +817,11 @@ struct classic_boss_thaddius : public ScriptedAI
                     }
                     me->RemoveAurasDueToSpell(SPELL_THADIUS_SPAWN);
                     me->SetUninteractible(false);
+                    // VMaNGOS only clears UNIT_FLAG_NOT_SELECTABLE here; the TC row also carries IMMUNE_TO_PC, and with it kept the raid
+                    // could never attack him (naxx_thaddius 1114f phase log: "immune to pc 1" through phase 2). The raid left his threat
+                    // list while he stood immune and the adds died, so it is put back on it before phase 2 picks the nearest target.
+                    me->SetImmuneToPC(false);
+                    DoZoneInCombat();
                     DoCastSelf(SPELL_THADIUS_LIGHTNING_VISUAL, true);
                     break;
                 case EVENT_THAD_TRANSITION_3:
@@ -929,7 +948,12 @@ struct classic_boss_thaddius : public ScriptedAI
         if (!m_pInstance)
             return;
 
-        if (m_Phase != THAD_NOT_STARTED)
+        // The transition is not a fight of his own: the adds are dead and he stands immune for 13 s while the coils overload, so his
+        // threat list may empty then (1114f: "phase 2 -> 0, threat list 0" between the coils' beam and his engage). It is filled again
+        // when he becomes attackable (EVENT_THAD_TRANSITION_2). Nor is his combat in it a stray one: the raid is on his threat list (naxx_thaddius
+        // 1115a: the adds died together at 133 s, and the startup check below, which the transition fell under, put him back to phase 0 at
+        // once with 35 on his threat list, "phase 2 -> 0, in combat").
+        if (m_Phase == THAD_PHASE1 || m_Phase == THAD_PHASE2)
         {
             if (me->GetThreatManager().IsThreatListEmpty(true))
             {
@@ -937,7 +961,7 @@ struct classic_boss_thaddius : public ScriptedAI
                 return;
             }
         }
-        else
+        else if (m_Phase == THAD_NOT_STARTED)
         {
             // He can act a bit weird if you stand next to him on server startup :/
             if (me->IsInCombat())

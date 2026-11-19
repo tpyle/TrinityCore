@@ -2410,6 +2410,14 @@ bool GameObject::ActivateToQuest(Player const* target) const
             if (getLootState() == GO_NOT_READY)
                 return false;
 
+            // Excavation Tools also drops the item that offers quest 86613.
+            // Enable the first interaction before the collection objective exists.
+            if (GetEntry() == 665282 && target->GetQuestStatus(86613) == QUEST_STATUS_NONE
+                && !target->HasItemCount(278049, 1, true))
+                if (Quest const* quest = sObjectMgr->GetQuestTemplate(86613))
+                    if (target->CanTakeQuest(quest, false))
+                        return true;
+
             // scan GO chest with loot including quest items
             if (target->GetQuestStatus(GetGOInfo()->chest.questID) == QUEST_STATUS_INCOMPLETE
                 || LootTemplates_Gameobject.HaveQuestLootForPlayer(GetGOInfo()->chest.chestLoot, target)
@@ -4720,6 +4728,7 @@ public:
     int64 GetPackedRotation() const override { return _owner->GetPackedLocalRotation(); }
     float GetScale() const override { return _owner->GetObjectScale(); }
     void DebugVisualizeCorner(G3D::Vector3 const& corner) const override { _owner->SummonCreature(1, corner.x, corner.y, corner.z, 0, TEMPSUMMON_MANUAL_DESPAWN); }
+    bool IsDoor() const override { return _owner->GetGoType() == GAMEOBJECT_TYPE_DOOR; }
 
 private:
     GameObject* _owner;

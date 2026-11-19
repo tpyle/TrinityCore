@@ -15,12 +15,14 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "Log.h"
 #include "ClubMembershipService.h"
 #include "BattlenetRpcErrorCodes.h"
 #include "CharacterCache.h"
 #include "ClubService.h"
 #include "ClubUtils.h"
 #include "Guild.h"
+#include "Log.h"
 #include "Player.h"
 
 namespace Battlenet::Services

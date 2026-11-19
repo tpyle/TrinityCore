@@ -52,6 +52,7 @@
 #include "CreatureTextMgr.h"
 #include "DB2Stores.h"
 #include "DatabaseEnv.h"
+#include "DayCycle.h"
 #include "DetourMemoryFunctions.h"
 #include "DisableMgr.h"
 #include "GameEventMgr.h"
@@ -63,6 +64,7 @@
 #include "GridNotifiersImpl.h"
 #include "GroupMgr.h"
 #include "GuildMgr.h"
+#include "HeadlessPackets.h"
 #include "HandcraftedRoadStorage.h"
 #include "IPLocation.h"
 #include "InstanceLockMgr.h"
@@ -112,6 +114,7 @@
 #include "WhoListStorage.h"
 #include "WorldSession.h"
 #include "WorldStateMgr.h"
+#include "WorldTickStats.h"
 #include <zlib.h>
 #include <filesystem>
 
@@ -594,6 +597,10 @@ void World::LoadConfigSettings(bool reload)
 
     TC_LOG_INFO("server.loading", "Using {} DBC Locale", localeNames[m_defaultDbcLocale]);
 
+    Trinity::HeadlessPackets::Enabled.store(sConfigMgr->GetBoolDefault("Bots.SkipClientPackets"sv, true), std::memory_order_relaxed);
+    Trinity::HeadlessPackets::VisibilityEnabled.store(sConfigMgr->GetBoolDefault("Bots.SkipClientVisibility"sv, true), std::memory_order_relaxed);
+    Trinity::WorldTickStats::Get().enabled.store(sConfigMgr->GetBoolDefault("WorldTickStats.Log"sv, false), std::memory_order_relaxed);
+
     ///- Read the player limit and the Message of the day from the config file
     SetPlayerAmountLimit(sConfigMgr->GetIntDefault("PlayerLimit"sv, 100));
     SetMotd(sConfigMgr->GetStringDefault("Motd"sv, "Welcome to a TrinityCore Server."sv));
@@ -634,6 +641,7 @@ void World::LoadConfigSettings(bool reload)
         { .Name = "Instance.PersistRaidTrash"sv, .DefaultValue = false, .Index = CONFIG_INSTANCE_PERSIST_RAID_TRASH },
         { .Name = "Instance.MoltenCoreHoundsLinked"sv, .DefaultValue = false, .Index = CONFIG_MC_CORE_HOUNDS_LINKED },
         { .Name = "Instance.MoltenCoreSkipRunes"sv, .DefaultValue = false, .Index = CONFIG_MC_SKIP_RUNES },
+        { .Name = "Instance.NefarianCapAdds"sv, .DefaultValue = false, .Index = CONFIG_BWL_NEFARIAN_CAP_ADDS },
         { .Name = "Instance.IgnoreRaid"sv, .DefaultValue = false, .Index = CONFIG_INSTANCE_IGNORE_RAID },
         { .Name = "Instance.CombatResurrectionLimit"sv, .DefaultValue = false, .Index = CONFIG_INSTANCE_COMBAT_RES_LIMIT },
         { .Name = "CastUnstuck"sv, .DefaultValue = true, .Index = CONFIG_CAST_UNSTUCK },
@@ -714,6 +722,11 @@ void World::LoadConfigSettings(bool reload)
         { .Name = "Classic.ForeverKillXp"sv, .DefaultValue = false, .Index = CONFIG_CLASSIC_FOREVER_KILL_XP },
         { .Name = "Classic.AutoEquipNewBags"sv, .DefaultValue = false, .Index = CONFIG_CLASSIC_AUTO_EQUIP_NEW_BAGS },
         { .Name = "Classic.CreatureHealth.Raids"sv, .DefaultValue = false, .Index = CONFIG_CLASSIC_CREATURE_HEALTH_RAIDS },
+        { .Name = "Forever.VanillaAoE"sv, .DefaultValue = false, .Index = CONFIG_FOREVER_VANILLA_AOE },
+        // read here once, not on every path or every death: a key missing from an older worldserver.conf warned on every read
+        // and flooded the console ("Missing name Pathfinding.PetLiquidCost", 0.1.37.1)
+        { .Name = "Pathfinding.PreferRoads"sv, .DefaultValue = false, .Index = CONFIG_PATHFINDING_PREFER_ROADS },
+        { .Name = "Classic.Hardcore"sv, .DefaultValue = false, .Index = CONFIG_CLASSIC_HARDCORE, .Reloadable = false },
     } };
 
     static constexpr ConfigOptionLoadDefinitionArray<uint32, INT_CONFIG_VALUE_COUNT> ints =
@@ -867,7 +880,7 @@ void World::LoadConfigSettings(bool reload)
         { .Name = "NoGrayAggro.Above"sv, .DefaultValue = 0, .Index = CONFIG_NO_GRAY_AGGRO_ABOVE },
         { .Name = "NoGrayAggro.Below"sv, .DefaultValue = 0, .Index = CONFIG_NO_GRAY_AGGRO_BELOW },
         { .Name = "Respawn.MinCheckIntervalMS"sv, .DefaultValue = 5000, .Index = CONFIG_RESPAWN_MINCHECKINTERVALMS },
-        { .Name = "Respawn.DynamicMode"sv, .DefaultValue = 0, .Index = CONFIG_RESPAWN_DYNAMICMODE, .Min = 0, .Max = 1 },
+        { .Name = "Respawn.DynamicMode"sv, .DefaultValue = 1, .Index = CONFIG_RESPAWN_DYNAMICMODE, .Min = 0, .Max = 1 },
         { .Name = "Respawn.GuidWarnLevel"sv, .DefaultValue = 12000000, .Index = CONFIG_RESPAWN_GUIDWARNLEVEL, .Min = 0, .Max = 16777215 },
         { .Name = "Respawn.GuidAlertLevel"sv, .DefaultValue = 16000000, .Index = CONFIG_RESPAWN_GUIDALERTLEVEL, .Min = 0, .Max = 16777215 },
         { .Name = "Respawn.RestartQuietTime"sv, .DefaultValue = 3, .Index = CONFIG_RESPAWN_RESTARTQUIETTIME, .Min = 0, .Max = 23 },
@@ -923,6 +936,7 @@ void World::LoadConfigSettings(bool reload)
         { .Name = "Classic.Respawn.Level31to60Pct"sv, .DefaultValue = 100, .Index = CONFIG_CLASSIC_RESPAWN_LEVEL_31_60_PCT, .Min = 10, .Max = 1000 },
         { .Name = "Classic.CreatureHealth.RaiseFromLevel"sv, .DefaultValue = 20, .Index = CONFIG_CLASSIC_CREATURE_HEALTH_RAISE_FROM_LEVEL, .Min = 1, .Max = 59 },
         { .Name = "Classic.CreatureHealth.RaiseAt60Pct"sv, .DefaultValue = 20, .Index = CONFIG_CLASSIC_CREATURE_HEALTH_RAISE_AT_60_PCT, .Max = 200 },
+        { .Name = "Forever.DayCycle.Speed"sv, .DefaultValue = 1, .Index = CONFIG_FOREVER_DAY_CYCLE_SPEED, .Min = DayCycle::MinSpeed, .Max = DayCycle::MaxSpeed, .Reloadable = false },
     } };
 
     static constexpr ConfigOptionLoadDefinitionArray<uint64, INT64_CONFIG_VALUE_COUNT> int64s =
@@ -963,6 +977,10 @@ void World::LoadConfigSettings(bool reload)
         { .Name = "Pvp.FactionBalance.Pct5"sv, .DefaultValue = 0.6f, .Index = CONFIG_CALL_TO_ARMS_5_PCT },
         { .Name = "Pvp.FactionBalance.Pct10"sv, .DefaultValue = 0.7f, .Index = CONFIG_CALL_TO_ARMS_10_PCT },
         { .Name = "Pvp.FactionBalance.Pct20"sv, .DefaultValue = 0.8f, .Index = CONFIG_CALL_TO_ARMS_20_PCT },
+        { .Name = "Pathfinding.RoadCost"sv, .DefaultValue = 0.5f, .Index = CONFIG_PATHFINDING_ROAD_COST },
+        { .Name = "Pathfinding.RoadCostMounted"sv, .DefaultValue = 0.35f, .Index = CONFIG_PATHFINDING_ROAD_COST_MOUNTED },
+        { .Name = "Pathfinding.SlopeCoefficient"sv, .DefaultValue = 0.0f, .Index = CONFIG_PATHFINDING_SLOPE_COEFFICIENT },
+        { .Name = "Pathfinding.PetLiquidCost"sv, .DefaultValue = 2.5f, .Index = CONFIG_PATHFINDING_PET_LIQUID_COST },
     } };
 
     static constexpr ConfigOptionLoadDefinitionArray<float, MAX_RATES> rates =
@@ -1271,7 +1289,7 @@ void World::LoadConfigSettings(bool reload)
     _gameRules.clear();
     for (auto [rule, value] : std::initializer_list<std::pair<int32, int32>>{
         { 213, 1 }, { 216, 2 }, { 174, 1 }, { 206, 1 }, { 109, 1 }, { 114, 1 }, { 211, 1 }, { 112, 1 }, { 173, 1 }, { 154, 0 },
-        { 180, 0 }, { 181, 1 }, { 182, 1 }, { 195, 1 }, { 23, 1 }, { 98, 0 }, { 93, 2 }, { 102, 1 }, { 42, 1 }, { 40, 0 },
+        { 180, 0 }, { 181, 1 }, { 182, 1 }, { 195, 1 }, { 23, 1 }, { 98, 0 }, { 93, 2 }, { 102, 1 }, { 40, 0 },
         { 157, 1 }, { 190, 0 }, { 162, 1 }, { 209, 1 }, { 89, 1 }, { 177, 1 }, { 197, 1 }, { 199, -5 }, { 63, 1 }, { 90, 1 },
         { 244, 1 }, { 33, 20 }, { 129, 0 }, { 228, 1 }, { 241, 1 }, { 243, 1 }, { 101, 1 }, { 237, 0 },
         // official 70205 and 70235 sniffs also send these (not in 70124); 242 / 247 are suspected to switch on the new Social window tabs
@@ -1282,8 +1300,12 @@ void World::LoadConfigSettings(bool reload)
         _gameRules.push_back({ .Rule = ::GameRule(rule), .Value = value });
     _gameRules.push_back({ .Rule = ::GameRule(200), .Value = 0.5f });
 
+    // EncounterJournalDisabled (42): the official realm sends 1, which closes the Adventure Guide (Shift-J). Classic.AdventureGuide
+    // opens it (rule 0): boss abilities and loot of dungeons and raids. Default off, as on the official realm.
+    _gameRules.push_back({ .Rule = ::GameRule::EncounterJournalDisabled, .Value = int32(sConfigMgr->GetBoolDefault("Classic.AdventureGuide", false) ? 0 : 1) });
+
     // Classic 1.60 Hardcore ruleset realm: C_GameRules.IsHardcoreActive() drives the client's Hardcore UI
-    if (sConfigMgr->GetBoolDefault("Classic.Hardcore", false))
+    if (getBoolConfig(CONFIG_CLASSIC_HARDCORE))
         _gameRules.push_back({ .Rule = ::GameRule::HardcoreRuleset, .Value = true });
 
     // PremadeGroupFinderStyle (93) = 2 is in the list above: the client loads its "Vanilla style" group finder
@@ -1470,6 +1492,7 @@ bool World::SetInitialWorldSettings()
     sSpellMgr->LoadClassicSpellEffects();
     sSpellMgr->LoadClassicSpellValues();
     sSpellMgr->LoadClassicSpellCosts();
+    sSpellMgr->LoadForeverVanillaAoe();
 
     TC_LOG_INFO("server.loading", "Loading SkillLineAbilityMultiMap Data...");
     sSpellMgr->LoadSkillLineAbilityMap();
@@ -2252,10 +2275,22 @@ void World::LoadAutobroadcasts()
     TC_LOG_INFO("server.loading", ">> Loaded {} autobroadcast definitions in {} ms", m_Autobroadcasts.size(), GetMSTimeDiffToNow(oldMSTime));
 }
 
+namespace
+{
+    // [world_tick] accumulators (world thread): the world updates since the maps last ran.
+    uint64 _tickStatsTotalUs = 0;
+    uint64 _tickStatsMapsUs = 0;
+    uint64 _tickStatsSessionsUs = 0;
+    bool _tickStatsMapsRan = false;
+}
+
 /// Update the World !
 void World::Update(uint32 diff)
 {
     TC_METRIC_TIMER("world_update_time_total");
+    bool const tickStats = Trinity::WorldTickStats::Enabled();
+    Trinity::WorldTickStats::Clock::time_point const tickStart = tickStats ? Trinity::WorldTickStats::Clock::now()
+                                                                           : Trinity::WorldTickStats::Clock::time_point();
     ///- Update the game time and check for shutdown time
     _UpdateGameTime();
     time_t currentGameTime = GameTime::GetGameTime();
@@ -2394,7 +2429,11 @@ void World::Update(uint32 diff)
     {
         /// <li> Handle session updates when the timer has passed
         TC_METRIC_TIMER("world_update_time", TC_METRIC_TAG("type", "Update sessions"));
+        Trinity::WorldTickStats::Clock::time_point const sessionsStart = tickStats ? Trinity::WorldTickStats::Clock::now()
+                                                                                   : Trinity::WorldTickStats::Clock::time_point();
         UpdateSessions(diff);
+        if (tickStats)
+            _tickStatsSessionsUs += Trinity::WorldTickStats::Since(sessionsStart);
     }
 
     /// <li> Update uptime table
@@ -2443,7 +2482,15 @@ void World::Update(uint32 diff)
     ///- Update objects when the timer has passed (maps, transport, creatures, ...)
     {
         TC_METRIC_TIMER("world_update_time", TC_METRIC_TAG("type", "Update maps"));
+        Trinity::WorldTickStats::Clock::time_point const mapsStart = tickStats ? Trinity::WorldTickStats::Clock::now()
+                                                                               : Trinity::WorldTickStats::Clock::time_point();
+        Trinity::WorldTickStats::Get().mapsRan = false;
         sMapMgr->Update(diff);
+        if (tickStats && Trinity::WorldTickStats::Get().mapsRan)
+        {
+            _tickStatsMapsUs = Trinity::WorldTickStats::Since(mapsStart);
+            _tickStatsMapsRan = true;
+        }
     }
 
     {
@@ -2568,6 +2615,27 @@ void World::Update(uint32 diff)
         // Stats logger update
         sMetric->Update();
         TC_METRIC_VALUE("update_time_diff", diff);
+    }
+
+    // [world_tick]: the cost of one game step (the world updates since the maps last ran, plus that map update).
+    if (tickStats)
+    {
+        _tickStatsTotalUs += Trinity::WorldTickStats::Since(tickStart);
+        if (_tickStatsMapsRan)
+        {
+            std::string const line = Trinity::WorldTickStats::NoteTick(_tickStatsTotalUs, _tickStatsMapsUs, _tickStatsSessionsUs,
+                                                                       uint64(GameTime::GetGameTimeMS()));
+            if (!line.empty())
+                TC_LOG_INFO("server.worldtick", "[world_tick] {} | players={} sessions={}", line, uint32(ObjectAccessor::GetPlayers().size()),
+                            GetActiveSessionCount());
+            _tickStatsTotalUs = _tickStatsMapsUs = _tickStatsSessionsUs = 0;
+            _tickStatsMapsRan = false;
+        }
+    }
+    else
+    {
+        _tickStatsTotalUs = _tickStatsMapsUs = _tickStatsSessionsUs = 0;
+        _tickStatsMapsRan = false;
     }
 }
 
